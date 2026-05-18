@@ -1,0 +1,459 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum OrderStatus {
+  PENDING
+  ACCEPTED
+  PREPARING
+  READY
+  OUT_FOR_DELIVERY
+  COMPLETED
+  CANCELLED
+}
+
+enum BillStatus {
+  UNPAID
+  PAID
+  PARTIAL
+  CANCELLED
+}
+
+model Restaurant {
+  id        Int     @id @default(autoincrement())
+  name      String
+  email     String? // ❌ removed @unique
+  phone     String?
+  address   String?
+  gstNumber String?
+  insights  RestaurantInsights[]
+  ownerId Int?
+  owner   User? @relation("RestaurantOwner", fields: [ownerId], references: [id])
+  inventoryRestocks InventoryRestock[]
+  users User[] @relation("RestaurantUsers")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branches   Branch[]
+  categories Category[]
+  menuItems  MenuItem[]
+  customers  Customer[]
+  bills      Bill[]
+  runningOrders RunningOrder[]
+  orders  Order[]
+  logo String?
+  ingredientCategories IngredientCategory[]
+  ingredients          Ingredient[]
+  @@index([ownerId]) // ✅ added
+}
+
+model Branch {
+  id           Int               @id @default(autoincrement())
+  name         String
+  address      String?
+  phone        String?
+  email        String?
+  restaurantId Int
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  city         String? // ✅ ADD
+  state        String? // ✅ ADD
+  pincode      String? // ✅ ADD
+  menuItems    MenuItem[]
+  tables       RestaurantTable[]
+  isActive     Boolean           @default(true) // ✅ ADD
+  restaurant   Restaurant        @relation(fields: [restaurantId], references: [id])
+  users        User[]
+  bills        Bill[]
+  orders       Order[]
+  runningOrders RunningOrder[]
+  isDeleted    Boolean           @default(false)
+  billing BillingSettings? 
+  insights  RestaurantInsights[]
+  @@index([restaurantId])
+}
+
+model User {
+  id               Int          @id @default(autoincrement())
+  name             String
+  email            String       @unique
+  password         String
+  hasLogin         Boolean @default(false)
+  role             String
+  phone            String?      @unique
+  restaurantId     Int?
+  branchId         Int?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  isActive         Boolean      @default(true) // ✅ ADD
+  isDeleted        Boolean      @default(false)
+  restaurant       Restaurant?  @relation("RestaurantUsers", fields: [restaurantId], references: [id])
+  ownedRestaurants Restaurant[] @relation("RestaurantOwner")
+  branch           Branch?      @relation(fields: [branchId], references: [id])
+  salary      Float?
+  joiningDate DateTime?
+  shift       String?
+  employmentType String?
+  monthlyWorkingHours Float?
+  department     String?
+}
+
+model Category {
+  id           Int      @id @default(autoincrement())
+  name         String
+  icon         String? // ✅ ADD THIS
+  restaurantId Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  menuItems  MenuItem[]
+
+  isDeleted Boolean @default(false)
+
+  @@index([restaurantId])
+}
+
+model BillingSettings {
+  id              Int      @id @default(autoincrement())
+  branchId        Int      @unique   // 🔥 IMPORTANT
+  billingTypes    String[]
+  gstPercentage   Float
+  serviceCharge   Float
+  includeGST      Boolean
+  enableDiscount  Boolean
+  enableTips      Boolean
+  paymentMethods  String[]
+
+  branch          Branch   @relation(fields: [branchId], references: [id])
+}
+
+model MenuItem {
+  id          Int     @id @default(autoincrement())
+  name        String
+  description String?
+  price       Float
+  prepTime    Int @default(0)
+  restaurantId Int
+  branchId     Int?
+  type         String?
+  categoryId   Int?
+  isAvailable Boolean @default(true)
+  isDeleted   Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id])
+  category   Category?  @relation(fields: [categoryId], references: [id])
+  menuItemIngredients MenuItemIngredient[]
+
+  @@index([restaurantId])
+  @@index([branchId])
+}
+
+model Customer {
+  id           Int      @id @default(autoincrement())
+  name         String
+  phone        String   @unique
+  email        String?
+  address      String?
+  restaurantId Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  bills      Bill[]
+}
+
+model Bill {
+  id            Int        @id @default(autoincrement())
+  billNo        String     @unique
+  orderType     String
+  paymentMethod String
+
+  // PAYMENT STATUS
+  status        BillStatus
+
+  // ORDER STATUS
+  orderStatus   String     @default("COMPLETED")
+
+  subtotal      Float
+  gst           Float
+  discount      Float
+  total         Float
+
+  notes         String?
+
+  restaurantId  Int
+  branchId      Int?
+  customerId    Int?
+  createdById   Int?
+
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  restaurant    Restaurant @relation(fields: [restaurantId], references: [id])
+
+  branch        Branch?    @relation(fields: [branchId], references: [id])
+
+  customer      Customer?  @relation(fields: [customerId], references: [id])
+
+  items         BillItem[]
+
+  @@index([restaurantId])
+}
+
+
+
+model BillItem {
+  id         Int      @id @default(autoincrement())
+  billId     Int
+  menuItemId Int?
+  itemName   String
+  quantity   Int
+  price      Float
+  total      Float
+  createdAt  DateTime @default(now())
+
+  bill Bill @relation(fields: [billId], references: [id])
+}
+
+model RestaurantTable {
+  id           Int      @id @default(autoincrement())
+  name         String
+  capacity     Int?
+  status       String   @default("AVAILABLE")
+  restaurantId Int
+  branchId     Int
+  branch       Branch   @relation(fields: [branchId], references: [id])
+  runningOrders RunningOrder[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+model RunningOrder {
+  id             Int      @id @default(autoincrement())
+  paymentStatus String @default("UNPAID")
+  restaurantId   Int
+  branchId       Int
+  tableId        Int?
+
+  // ORDER INFO
+  orderType      String?
+  customerName   String?
+  customerPhone  String?
+  paymentMethod  String?
+
+  // ORDER FLOW STATUS
+  orderStatus    String   @default("ACTIVE")
+
+  // INTERNAL STATUS
+  status         String   @default("ACTIVE")
+
+  startedAt      DateTime @default(now())
+  completedAt    DateTime?
+
+  totalAmount    Float    @default(0)
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  restaurant     Restaurant       @relation(fields: [restaurantId], references: [id])
+
+  branch         Branch           @relation(fields: [branchId], references: [id])
+
+  table          RestaurantTable? @relation(fields: [tableId], references: [id])
+
+  batches        RunningOrderBatch[]
+
+  @@index([restaurantId])
+
+  @@index([branchId])
+
+  @@index([tableId])
+}
+model RunningOrderBatch {
+  id               Int      @id @default(autoincrement())
+  runningOrderId   Int
+  createdAt        DateTime @default(now())
+  runningOrder RunningOrder @relation(fields: [runningOrderId], references: [id])
+  items RunningOrderBatchItem[]
+}
+
+model RunningOrderBatchItem {
+  id                    Int      @id @default(autoincrement())
+  runningOrderBatchId   Int
+  menuItemId            Int?
+  itemName              String
+  quantity              Int
+  price                 Float
+  total                 Float
+  status                String @default("PENDING")
+  createdAt             DateTime @default(now())
+  runningOrderBatch RunningOrderBatch @relation(fields: [runningOrderBatchId], references: [id])
+}
+
+model Order {
+  id           Int    @id @default(autoincrement())
+  orderNo      String @unique
+  restaurantId Int
+  branchId     Int // ✅ make REQUIRED
+
+  tableId    Int?
+  customerId Int?
+
+  status    OrderStatus
+  orderType String
+
+  subtotal Float
+  gst      Float
+  discount Float
+  total    Float
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 🔥 RELATIONS
+  branch     Branch     @relation(fields: [branchId], references: [id])
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+
+  @@index([restaurantId])
+  @@index([branchId]) // ✅ add for performance
+}
+
+model OrderItem {
+  id         Int      @id @default(autoincrement())
+  orderId    Int
+  menuItemId Int?
+  itemName   String
+  quantity   Int
+  price      Float
+  total      Float
+  createdAt  DateTime @default(now())
+}
+
+model IngredientCategory {
+  id            Int      @id @default(autoincrement())
+  name          String
+  restaurantId  Int
+  createdAt     DateTime @default(now())
+  restaurant    Restaurant @relation(fields: [restaurantId], references: [id])
+  ingredients   Ingredient[]
+}
+
+model Ingredient {
+  id                Int      @id @default(autoincrement())
+  name              String
+  restaurantId      Int
+  categoryId        Int?
+  quantity          Float?
+  unit              String?
+  purchasePrice     Float?
+  pricePerUnit      Float?
+  isAiGenerated     Boolean @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  restaurant        Restaurant @relation(fields: [restaurantId], references: [id])
+  category          IngredientCategory? @relation(fields: [categoryId], references: [id])
+  menuItemIngredients MenuItemIngredient[]
+}
+
+model RestaurantInsights {
+
+  id Int @id @default(autoincrement())
+  restaurantId Int
+  branchId Int
+
+  /* FIXED EXPENSES */
+
+  monthlyRent Float? @default(0)
+  loanEmi Float? @default(0)
+  internet Float? @default(0)
+  phoneBills Float? @default(0)
+  accounting Float? @default(0)
+  insurance Float? @default(0)
+  licenses Float? @default(0)
+
+  /* VARIABLE EXPENSES */
+
+  deliveryCharges Float? @default(0)
+  packaging Float? @default(0)
+  paymentGateway Float? @default(0)
+  aggregatorCommission Float? @default(0)
+  electricity Float? @default(0)
+  gas Float? @default(0)
+  maintenance Float? @default(0)
+  fuel Float? @default(0)
+
+  /* FINANCIAL TARGETS */
+
+  targetEbitda Float? @default(0)
+  targetFoodCost Float? @default(0)
+  targetGrossMargin Float? @default(0)
+  targetPrimeCost Float? @default(0)
+  monthlyRevenueGoal Float? @default(0)
+  monthlyProfitGoal Float? @default(0)
+
+  /* TAX & FINANCE */
+
+  gstPercentage Float? @default(0)
+  monthlyLoanEmi Float? @default(0)
+  monthlyInterestPayments Float? @default(0)
+  caFees Float? @default(0)
+  insuranceCost Float? @default(0)
+  otherTaxes Float? @default(0)
+
+  /* BUSINESS ASSUMPTIONS */
+
+  expectedMonthlyGrowth Float? @default(0)
+  expectedDeliveryGrowth Float? @default(0)
+  expectedInflation Float? @default(0)
+  seasonalImpact Float? @default(0)
+  weekendSalesIncrease Float? @default(0)
+  plannedExpansion String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch Branch @relation(fields: [branchId], references: [id])
+    
+
+  @@unique([restaurantId, branchId])
+}
+
+model InventoryRestock {
+  id            Int       @id @default(autoincrement())
+  restaurantId  Int
+  month         Int
+  year          Int
+  data          Json
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  restaurant    Restaurant @relation(fields: [restaurantId],references: [id])
+
+  @@unique([restaurantId,month,year])
+}
+
+model MenuItemIngredient {
+  id            Int @id @default(autoincrement())
+
+  menuItemId    Int
+  ingredientId  Int
+
+  quantity      Float
+  unit          String
+
+  wastage       Float?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  menuItem       MenuItem @relation(fields: [menuItemId], references: [id])
+  ingredient     Ingredient @relation(fields: [ingredientId], references: [id])
+}

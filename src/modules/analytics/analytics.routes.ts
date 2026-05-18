@@ -1,0 +1,24 @@
+import { Router } from "express";
+import {
+  getBranchDashboardOverview,
+  getBranchInsights,
+  getRestaurantDashboardOverview,
+  getRestaurantInsights,
+  saveRestaurantInsights,
+} from "./analytics.controller";
+
+const router = Router();
+
+router.get(
+  "/:restaurantId/restaurantDashboardOverview",
+  getRestaurantDashboardOverview,
+);
+router.get(
+  "/:restaurantId/:branchId/branchDashboardOverview",
+  getBranchDashboardOverview,
+);
+router.post("/insights", saveRestaurantInsights);
+router.get("/insights/:restaurantId/:branchId", getBranchInsights);
+router.get("/insights/:restaurantId", getRestaurantInsights);
+
+export default router;
