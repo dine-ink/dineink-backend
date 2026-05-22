@@ -20,7 +20,7 @@ router.get("/shops", authMiddleware, getShops);
 router.get("/my-restaurant", authMiddleware, getMyRestaurant);
 router.get("/branch/:id", authMiddleware, getBranchDetails);
 router.put("/branch/:id", authMiddleware, updateBranchDetails);
-router.get("/staff/:restaurantId", getRestaurantStaff);
+router.get("/staff/:restaurantId/:branchId", getRestaurantStaff);
 router.get("/table/:restaurantId/:branchId", getTablesController);
 
 export default router;

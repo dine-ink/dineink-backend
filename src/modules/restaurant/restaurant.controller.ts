@@ -112,7 +112,9 @@ export const updateBranchDetails = async (req: Request, res: Response) => {
 export const getRestaurantStaff = async (req: Request, res: Response) => {
   try {
     const restaurantId = Number(req.params.restaurantId);
-    const data = await getRestaurantStaffData(restaurantId);
+    const branchId = Number(req.params.branchId);
+
+    const data = await getRestaurantStaffData(restaurantId, branchId);
 
     return res.status(200).json({
       success: true,

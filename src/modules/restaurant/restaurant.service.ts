@@ -268,10 +268,14 @@ export const updateBranchDetailsService = async (
   });
 };
 
-export const getRestaurantStaffData = async (restaurantId: number) => {
+export const getRestaurantStaffData = async (
+  restaurantId: number,
+  branchId: number,
+) => {
   return prisma.user.findMany({
     where: {
       restaurantId,
+      branchId,
     },
 
     include: {
