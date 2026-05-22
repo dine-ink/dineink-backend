@@ -186,7 +186,11 @@ export const getShopsService = async (userId: number) => {
     include: {
       restaurant: {
         include: {
-          branches: true,
+          branches: {
+            include: {
+              billing: true,
+            },
+          },
         },
       },
     },
@@ -293,6 +297,20 @@ export const getTablesService = async (
 
     orderBy: {
       createdAt: "asc",
+    },
+  });
+};
+
+export const getRestaurantInsights = async (
+  restaurantId: number,
+  branchId: number,
+) => {
+  return prisma.restaurantInsights.findUnique({
+    where: {
+      restaurantId_branchId: {
+        restaurantId,
+        branchId,
+      },
     },
   });
 };

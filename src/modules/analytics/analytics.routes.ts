@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   getBranchDashboardOverview,
   getBranchInsights,
+  getDashboardOverview,
   getRestaurantDashboardOverview,
   getRestaurantInsights,
   saveRestaurantInsights,
@@ -19,6 +20,7 @@ router.get(
 );
 router.post("/insights", saveRestaurantInsights);
 router.get("/insights/:restaurantId/:branchId", getBranchInsights);
-router.get("/insights/:restaurantId", getRestaurantInsights);
+router.get("/:restaurantId/getRestaurantInsights", getRestaurantInsights);
+router.get("/dashboardOverview", getDashboardOverview);
 
 export default router;

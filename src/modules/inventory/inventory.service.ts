@@ -1,6 +1,9 @@
 import prisma from "../../config/prisma";
 
-export const getMenuManagementService = async (restaurantId: number) => {
+export const getMenuManagementService = async (
+  restaurantId: number,
+  branchId?: number,
+) => {
   const [menuItems, ingredients, categories, restocks] = await Promise.all([
     prisma.menuItem.findMany({
       where: {
@@ -24,6 +27,14 @@ export const getMenuManagementService = async (restaurantId: number) => {
 
       include: {
         category: true,
+        ingredientVendors: {
+          where: {
+            branchId,
+          },
+          include: {
+            vendor: true,
+          },
+        },
       },
 
       orderBy: {
@@ -40,8 +51,11 @@ export const getMenuManagementService = async (restaurantId: number) => {
     prisma.inventoryRestock.findMany({
       where: {
         restaurantId,
-      },
 
+        ...(branchId && {
+          branchId,
+        }),
+      },
       orderBy: {
         createdAt: "desc",
       },
@@ -56,14 +70,52 @@ export const getMenuManagementService = async (restaurantId: number) => {
   };
 };
 
-export const saveMenuItemMappingData = async (body: any) => {
+export const saveMenuItemMappingData = async (
+  restaurantId: number,
+  body: any,
+) => {
   const { menuItemId, ingredients } = body;
+
+  // VERIFY MENU ITEM
+
+  const menuItem = await prisma.menuItem.findFirst({
+    where: {
+      id: menuItemId,
+      restaurantId,
+    },
+  });
+
+  if (!menuItem) {
+    throw new Error("Menu item not found");
+  }
+
+  // VERIFY INGREDIENTS
+
+  const ingredientIds = ingredients.map((i: any) => i.ingredientId);
+
+  const validIngredients = await prisma.ingredient.findMany({
+    where: {
+      id: {
+        in: ingredientIds,
+      },
+
+      restaurantId,
+    },
+  });
+
+  if (validIngredients.length !== ingredientIds.length) {
+    throw new Error("Invalid ingredients");
+  }
+
+  // DELETE OLD
 
   await prisma.menuItemIngredient.deleteMany({
     where: {
       menuItemId,
     },
   });
+
+  // CREATE NEW
 
   if (ingredients?.length) {
     await prisma.menuItemIngredient.createMany({
@@ -104,14 +156,16 @@ export const getMenuItemMappingData = async (restaurantId: number) => {
 
 export const saveRestockHistoryData = async (
   restaurantId: number,
+  branchId: number,
   month: number,
   year: number,
   data: any,
 ) => {
   return prisma.inventoryRestock.upsert({
     where: {
-      restaurantId_month_year: {
+      restaurantId_branchId_month_year: {
         restaurantId,
+        branchId,
         month,
         year,
       },
@@ -123,6 +177,7 @@ export const saveRestockHistoryData = async (
 
     create: {
       restaurantId,
+      branchId,
       month,
       year,
       data,
@@ -130,10 +185,17 @@ export const saveRestockHistoryData = async (
   });
 };
 
-export const getRestockHistoryData = async (restaurantId: number) => {
+export const getRestockHistoryData = async (
+  restaurantId: number,
+  branchId?: number,
+) => {
   return prisma.inventoryRestock.findMany({
     where: {
       restaurantId,
+
+      ...(branchId && {
+        branchId,
+      }),
     },
 
     orderBy: {

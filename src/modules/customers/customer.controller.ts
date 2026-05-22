@@ -7,7 +7,7 @@ import {
 
 export const getCustomersByBranch = async (req: Request, res: Response) => {
   try {
-    const restaurantId = Number(req.params.id);
+    const restaurantId = Number(req.params.restaurantId);
     const branchId = req.query.branchId ? Number(req.query.branchId) : null;
     const customers = await getCustomersByBranchService(restaurantId, branchId);
     return res.status(200).json({

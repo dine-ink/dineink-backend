@@ -34,12 +34,11 @@ model Restaurant {
   insights  RestaurantInsights[]
   ownerId Int?
   owner   User? @relation("RestaurantOwner", fields: [ownerId], references: [id])
-  inventoryRestocks InventoryRestock[]
   users User[] @relation("RestaurantUsers")
-
+  vendors Vendor[]  
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
+  inventoryRestocks InventoryRestock[]
   branches   Branch[]
   categories Category[]
   menuItems  MenuItem[]
@@ -74,8 +73,11 @@ model Branch {
   orders       Order[]
   runningOrders RunningOrder[]
   isDeleted    Boolean           @default(false)
+  inventoryRestocks InventoryRestock[]
+  vendors Vendor[]
   billing BillingSettings? 
   insights  RestaurantInsights[]
+  ingredientVendors IngredientVendor[]
   @@index([restaurantId])
 }
 
@@ -361,6 +363,36 @@ model Ingredient {
   restaurant        Restaurant @relation(fields: [restaurantId], references: [id])
   category          IngredientCategory? @relation(fields: [categoryId], references: [id])
   menuItemIngredients MenuItemIngredient[]
+  ingredientVendors IngredientVendor[]
+}
+
+model IngredientVendor {
+
+  id            Int      @id @default(autoincrement())
+
+  branchId      Int
+
+  ingredientId  Int
+
+  vendorId      Int
+
+  createdAt     DateTime @default(now())
+  
+  updatedAt     DateTime @updatedAt
+
+  branch        Branch @relation(fields: [branchId], references: [id])
+
+  ingredient    Ingredient @relation(fields: [ingredientId], references: [id])
+
+  vendor        Vendor @relation(fields: [vendorId], references: [id])
+
+  @@unique([branchId, ingredientId])
+
+  @@index([branchId])
+
+  @@index([ingredientId])
+
+  @@index([vendorId])
 }
 
 model RestaurantInsights {
@@ -428,18 +460,33 @@ model RestaurantInsights {
 }
 
 model InventoryRestock {
+
   id            Int       @id @default(autoincrement())
+
   restaurantId  Int
+
+  branchId      Int
+
   month         Int
+
   year          Int
+
   data          Json
+
   createdAt     DateTime  @default(now())
+
   updatedAt     DateTime  @updatedAt
-  restaurant    Restaurant @relation(fields: [restaurantId],references: [id])
 
-  @@unique([restaurantId,month,year])
+  restaurant    Restaurant   @relation(fields: [restaurantId], references: [id])
+
+  branch        Branch   @relation(fields: [branchId], references: [id])
+
+  @@unique([restaurantId, branchId, month, year])
+
+  @@index([restaurantId])
+
+  @@index([branchId])
 }
-
 model MenuItemIngredient {
   id            Int @id @default(autoincrement())
 
@@ -456,4 +503,27 @@ model MenuItemIngredient {
 
   menuItem       MenuItem @relation(fields: [menuItemId], references: [id])
   ingredient     Ingredient @relation(fields: [ingredientId], references: [id])
+}
+
+model Vendor {
+
+  id            Int      @id @default(autoincrement())
+  ingredientVendors IngredientVendor[]
+  name          String
+  address       String?
+  phone         String?
+
+  restaurantId  Int
+  branchId      Int?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  restaurant    Restaurant @relation(fields: [restaurantId],references: [id])
+
+  branch        Branch? @relation(fields: [branchId],references: [id])
+
+  @@index([restaurantId])
+
+  @@index([branchId])
 }

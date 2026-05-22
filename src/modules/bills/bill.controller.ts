@@ -26,7 +26,11 @@ export const getBills = async (req: Request, res: Response) => {
   try {
     const restaurantId = Number(req.params.id);
 
-    const bills = await getBillsService(restaurantId);
+    const branchId = req.query.branchId
+      ? Number(req.query.branchId)
+      : undefined;
+
+    const bills = await getBillsService(restaurantId, branchId);
     return res.status(200).json({
       success: true,
       bills,
@@ -43,7 +47,7 @@ export const getBranchWiseBills = async (req: Request, res: Response) => {
   try {
     const restaurantId = Number(req.params.restaurantId);
     const branchId = Number(req.params.branchId);
-
+    console.log(restaurantId, branchId, "ids");
     const bills = await getBranchWiseBillsService(restaurantId, branchId);
     return res.status(200).json({
       success: true,

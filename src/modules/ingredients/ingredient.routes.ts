@@ -4,6 +4,8 @@ import {
   saveIngredients,
   getIngredients,
   aiSuggestMapping,
+  uploadVendors,
+  getVendors,
 } from "./ingredient.controller";
 import { authMiddleware } from "../../middleware/auth";
 
@@ -11,11 +13,8 @@ const router = express.Router();
 
 router.post("/generateIngredients", generateIngredients);
 router.post("/saveIngredients", saveIngredients);
-router.get("/restaurant/:restaurantId/getIngredients", getIngredients);
-router.post(
-  "/menu-item-mapping/ai-suggestIngredients",
-  authMiddleware,
-  aiSuggestMapping,
-);
-
+router.get("/:restaurantId/getRestaurantIngredients", getIngredients);
+router.post("/ai-suggestIngredients", authMiddleware, aiSuggestMapping);
+router.post("/uploadVendorData", authMiddleware, uploadVendors);
+router.get("/:restaurantId/:branchId/fetchVendors", authMiddleware, getVendors);
 export default router;

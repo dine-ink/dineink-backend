@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 
 import {
   getBranchInsightsData,
+  getDashboardOverviewDataService,
   getDashboardOverviewService,
   getRestaurantInsightsData,
   saveRestaurantInsightsData,
@@ -14,19 +15,23 @@ export const getRestaurantDashboardOverview = async (
   try {
     const restaurantId = Number(req.params.restaurantId);
 
+    const branchId = req.query.branchId ? Number(req.query.branchId) : null;
+
     const range = req.query.range as string;
 
-    const data = await getDashboardOverviewService(restaurantId, null, range);
+    const data = await getDashboardOverviewService(
+      restaurantId,
+      branchId,
+      range,
+    );
 
     return res.status(200).json({
       success: true,
-
       data,
     });
   } catch (error: any) {
     return res.status(400).json({
       success: false,
-
       message: error.message,
     });
   }
@@ -118,6 +123,22 @@ export const getRestaurantInsights = async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch restaurant insights",
+    });
+  }
+};
+
+export const getDashboardOverview = async (req: Request, res: Response) => {
+  try {
+    const range = req.query.range as string;
+    const data = await getDashboardOverviewDataService(range);
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      success: false,
+      message: error.message,
     });
   }
 };

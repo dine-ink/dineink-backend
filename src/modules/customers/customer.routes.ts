@@ -7,8 +7,7 @@ import {
 
 const router = Router();
 
-router.get("/:id/customerByBranch", getCustomersByBranch);
-
+router.get("/:restaurantId/:branchId/customerByBranch", getCustomersByBranch);
 router.get("/:id/customerByRestaurant", getCustomersByRestaurant);
 
 export default router;

@@ -12,7 +12,9 @@ export const getMenuManagement = async (req: any, res: any) => {
   try {
     const restaurantId = Number(req.params.restaurantId);
 
-    const data = await getMenuManagementService(restaurantId);
+    const branchId = Number(req.query.branchId);
+
+    const data = await getMenuManagementService(restaurantId, branchId);
 
     return res.json({
       success: true,
@@ -26,17 +28,17 @@ export const getMenuManagement = async (req: any, res: any) => {
   }
 };
 
-export const saveMenuItemMapping = async (req: Request, res: Response) => {
+export const saveMenuItemMapping = async (req: any, res: Response) => {
   try {
-    const data = await saveMenuItemMappingData(req.body);
+    const restaurantId = req.user.restaurantId;
+
+    const data = await saveMenuItemMappingData(restaurantId, req.body);
 
     return res.status(200).json({
       success: true,
       data,
     });
   } catch (err: any) {
-    console.log(err);
-
     return res.status(500).json({
       success: false,
       message: err.message,
@@ -66,10 +68,11 @@ export const getMenuItemMapping = async (req: Request, res: Response) => {
 
 export const saveRestockHistory = async (req: Request, res: Response) => {
   try {
-    const { restaurantId, month, year, data } = req.body;
+    const { restaurantId, branchId, month, year, data } = req.body;
 
     const result = await saveRestockHistoryData(
       restaurantId,
+      branchId,
       month,
       year,
       data,
@@ -93,7 +96,9 @@ export const getRestockHistory = async (req: Request, res: Response) => {
   try {
     const restaurantId = Number(req.params.restaurantId);
 
-    const result = await getRestockHistoryData(restaurantId);
+    const branchId = Number(req.query.branchId);
+
+    const result = await getRestockHistoryData(restaurantId, branchId);
 
     return res.json({
       success: true,
