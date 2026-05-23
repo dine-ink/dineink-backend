@@ -108,7 +108,7 @@ model User {
 model Category {
   id           Int      @id @default(autoincrement())
   name         String
-  icon         String?  THIS
+  icon         String?  
   restaurantId Int
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -306,7 +306,7 @@ model Order {
   restaurant Restaurant @relation(fields: [restaurantId], references: [id])
 
   @@index([restaurantId])
-  @@index([branchId])  for performance
+  @@index([branchId])  
 }
 
 model OrderItem {
