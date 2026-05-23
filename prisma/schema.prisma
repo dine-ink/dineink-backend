@@ -50,7 +50,7 @@ model Restaurant {
   ingredientCategories IngredientCategory[]
   ingredients          Ingredient[]
   @@index([ownerId]) 
-
+}
 model Branch {
   id           Int               @id @default(autoincrement())
   name         String
