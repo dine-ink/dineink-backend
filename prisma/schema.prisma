@@ -27,7 +27,7 @@ enum BillStatus {
 model Restaurant {
   id        Int     @id @default(autoincrement())
   name      String
-  email     String? // ❌ removed @unique
+  email     String? 
   phone     String?
   address   String?
   gstNumber String?
@@ -49,8 +49,7 @@ model Restaurant {
   logo String?
   ingredientCategories IngredientCategory[]
   ingredients          Ingredient[]
-  @@index([ownerId]) // ✅ added
-}
+  @@index([ownerId]) 
 
 model Branch {
   id           Int               @id @default(autoincrement())
@@ -61,12 +60,12 @@ model Branch {
   restaurantId Int
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
-  city         String? // ✅ ADD
-  state        String? // ✅ ADD
-  pincode      String? // ✅ ADD
+  city         String? 
+  state        String? 
+  pincode      String? 
   menuItems    MenuItem[]
   tables       RestaurantTable[]
-  isActive     Boolean           @default(true) // ✅ ADD
+  isActive     Boolean           @default(true) 
   restaurant   Restaurant        @relation(fields: [restaurantId], references: [id])
   users        User[]
   bills        Bill[]
@@ -93,7 +92,7 @@ model User {
   branchId         Int?
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
-  isActive         Boolean      @default(true) // ✅ ADD
+  isActive         Boolean      @default(true) 
   isDeleted        Boolean      @default(false)
   restaurant       Restaurant?  @relation("RestaurantUsers", fields: [restaurantId], references: [id])
   ownedRestaurants Restaurant[] @relation("RestaurantOwner")
@@ -109,22 +108,19 @@ model User {
 model Category {
   id           Int      @id @default(autoincrement())
   name         String
-  icon         String? // ✅ ADD THIS
+  icon         String?  THIS
   restaurantId Int
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
-
   restaurant Restaurant @relation(fields: [restaurantId], references: [id])
   menuItems  MenuItem[]
-
   isDeleted Boolean @default(false)
-
   @@index([restaurantId])
 }
 
 model BillingSettings {
   id              Int      @id @default(autoincrement())
-  branchId        Int      @unique   // 🔥 IMPORTANT
+  branchId        Int      @unique   
   billingTypes    String[]
   gstPercentage   Float
   serviceCharge   Float
@@ -132,7 +128,6 @@ model BillingSettings {
   enableDiscount  Boolean
   enableTips      Boolean
   paymentMethods  String[]
-
   branch          Branch   @relation(fields: [branchId], references: [id])
 }
 
@@ -154,7 +149,6 @@ model MenuItem {
   branch     Branch?    @relation(fields: [branchId], references: [id])
   category   Category?  @relation(fields: [categoryId], references: [id])
   menuItemIngredients MenuItemIngredient[]
-
   @@index([restaurantId])
   @@index([branchId])
 }
@@ -168,7 +162,6 @@ model Customer {
   restaurantId Int
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
-
   restaurant Restaurant @relation(fields: [restaurantId], references: [id])
   bills      Bill[]
 }
@@ -184,7 +177,6 @@ model Bill {
 
   // ORDER STATUS
   orderStatus   String     @default("COMPLETED")
-
   subtotal      Float
   gst           Float
   discount      Float
@@ -201,13 +193,9 @@ model Bill {
   updatedAt     DateTime   @updatedAt
 
   restaurant    Restaurant @relation(fields: [restaurantId], references: [id])
-
   branch        Branch?    @relation(fields: [branchId], references: [id])
-
   customer      Customer?  @relation(fields: [customerId], references: [id])
-
   items         BillItem[]
-
   @@index([restaurantId])
 }
 
@@ -238,6 +226,7 @@ model RestaurantTable {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
+
 model RunningOrder {
   id             Int      @id @default(autoincrement())
   paymentStatus String @default("UNPAID")
@@ -266,19 +255,15 @@ model RunningOrder {
   updatedAt      DateTime @updatedAt
 
   restaurant     Restaurant       @relation(fields: [restaurantId], references: [id])
-
   branch         Branch           @relation(fields: [branchId], references: [id])
-
   table          RestaurantTable? @relation(fields: [tableId], references: [id])
-
   batches        RunningOrderBatch[]
 
   @@index([restaurantId])
-
   @@index([branchId])
-
   @@index([tableId])
 }
+
 model RunningOrderBatch {
   id               Int      @id @default(autoincrement())
   runningOrderId   Int
@@ -304,14 +289,11 @@ model Order {
   id           Int    @id @default(autoincrement())
   orderNo      String @unique
   restaurantId Int
-  branchId     Int // ✅ make REQUIRED
-
+  branchId     Int 
   tableId    Int?
   customerId Int?
-
   status    OrderStatus
   orderType String
-
   subtotal Float
   gst      Float
   discount Float
@@ -320,12 +302,11 @@ model Order {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // 🔥 RELATIONS
   branch     Branch     @relation(fields: [branchId], references: [id])
   restaurant Restaurant @relation(fields: [restaurantId], references: [id])
 
   @@index([restaurantId])
-  @@index([branchId]) // ✅ add for performance
+  @@index([branchId])  for performance
 }
 
 model OrderItem {
@@ -369,29 +350,18 @@ model Ingredient {
 model IngredientVendor {
 
   id            Int      @id @default(autoincrement())
-
   branchId      Int
-
   ingredientId  Int
-
   vendorId      Int
-
   createdAt     DateTime @default(now())
-  
   updatedAt     DateTime @updatedAt
-
   branch        Branch @relation(fields: [branchId], references: [id])
-
   ingredient    Ingredient @relation(fields: [ingredientId], references: [id])
-
   vendor        Vendor @relation(fields: [vendorId], references: [id])
 
   @@unique([branchId, ingredientId])
-
   @@index([branchId])
-
   @@index([ingredientId])
-
   @@index([vendorId])
 }
 
@@ -455,47 +425,35 @@ model RestaurantInsights {
   restaurant Restaurant @relation(fields: [restaurantId], references: [id])
   branch Branch @relation(fields: [branchId], references: [id])
     
-
   @@unique([restaurantId, branchId])
 }
 
 model InventoryRestock {
 
   id            Int       @id @default(autoincrement())
-
   restaurantId  Int
-
   branchId      Int
-
   month         Int
-
   year          Int
-
   data          Json
 
   createdAt     DateTime  @default(now())
-
   updatedAt     DateTime  @updatedAt
 
   restaurant    Restaurant   @relation(fields: [restaurantId], references: [id])
-
   branch        Branch   @relation(fields: [branchId], references: [id])
 
   @@unique([restaurantId, branchId, month, year])
-
   @@index([restaurantId])
-
   @@index([branchId])
 }
+
 model MenuItemIngredient {
   id            Int @id @default(autoincrement())
-
   menuItemId    Int
   ingredientId  Int
-
   quantity      Float
   unit          String
-
   wastage       Float?
 
   createdAt     DateTime @default(now())
@@ -506,13 +464,11 @@ model MenuItemIngredient {
 }
 
 model Vendor {
-
   id            Int      @id @default(autoincrement())
   ingredientVendors IngredientVendor[]
   name          String
   address       String?
   phone         String?
-
   restaurantId  Int
   branchId      Int?
 
@@ -520,10 +476,8 @@ model Vendor {
   updatedAt     DateTime @updatedAt
 
   restaurant    Restaurant @relation(fields: [restaurantId],references: [id])
-
   branch        Branch? @relation(fields: [branchId],references: [id])
 
   @@index([restaurantId])
-
   @@index([branchId])
 }
