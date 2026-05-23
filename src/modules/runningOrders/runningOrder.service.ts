@@ -37,16 +37,19 @@ export const saveRunningOrderService = async (data: any) => {
       },
     });
     // UPDATE TABLE STATUS
-    await prisma.restaurantTable.updateMany({
-      where: {
-        id: tableId,
-        restaurantId,
-        branchId,
-      },
-      data: {
-        status: "OCCUPIED",
-      },
-    });
+    if (orderType === "DINE_IN" && tableId) {
+      await prisma.restaurantTable.updateMany({
+        where: {
+          id: tableId,
+          restaurantId,
+          branchId,
+        },
+
+        data: {
+          status: "OCCUPIED",
+        },
+      });
+    }
   }
   // CREATE BATCH
   const batch = await prisma.runningOrderBatch.create({
