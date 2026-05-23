@@ -14,19 +14,41 @@ export const loginUser = async (identifier: string, password: string) => {
         },
       ],
     },
+
     include: {
       restaurant: true,
       branch: true,
     },
   });
 
+  // USER NOT FOUND
+
   if (!user) {
     throw new Error("Invalid credentials");
   }
+
+  // USER DELETED / INACTIVE
+
+  if (user.isDeleted || !user.isActive) {
+    throw new Error("Account is inactive");
+  }
+
+  // LOGIN ACCESS CHECK
+
+  if (user.role !== "OWNER" && !user.hasLogin) {
+    throw new Error("Login access denied");
+  }
+
+  // PASSWORD CHECK
+
   const isPasswordValid = await bcrypt.compare(password, user.password);
+
   if (!isPasswordValid) {
     throw new Error("Invalid credentials");
   }
+
+  // TOKEN
+
   const token = generateToken({
     id: user.id,
     email: user.email,
@@ -34,17 +56,27 @@ export const loginUser = async (identifier: string, password: string) => {
     restaurantId: user.restaurantId,
     branchId: user.branchId,
   });
+
+  // REMOVE PASSWORD
+
   const { password: _, ...safeUser } = user;
+
+  // BRANCHES
+
   const branches = user.restaurantId
     ? await prisma.branch.findMany({
         where: {
           restaurantId: user.restaurantId,
+          isDeleted: false,
+          isActive: true,
         },
+
         orderBy: {
           createdAt: "asc",
         },
       })
     : [];
+
   return {
     token,
     user: safeUser,
