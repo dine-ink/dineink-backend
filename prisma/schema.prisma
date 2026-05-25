@@ -248,7 +248,7 @@ model RunningOrder {
 
   startedAt      DateTime @default(now())
   completedAt    DateTime?
-
+  createdById    Int?
   totalAmount    Float    @default(0)
 
   createdAt      DateTime @default(now())

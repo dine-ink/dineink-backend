@@ -192,6 +192,7 @@ export const closeRunningOrderService = async (data: any) => {
       paymentMethod,
       orderType,
       orderStatus: orderStatus,
+      createdById: runningOrder.createdById,
       items: {
         create: allItems.map((item) => ({
           menuItemId: item.menuItemId,
