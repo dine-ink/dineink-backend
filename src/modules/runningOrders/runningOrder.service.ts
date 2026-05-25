@@ -4,6 +4,7 @@ export const saveRunningOrderService = async (data: any) => {
   const {
     restaurantId,
     branchId,
+    createdById,
     tableId,
     items,
     orderType,
@@ -11,6 +12,7 @@ export const saveRunningOrderService = async (data: any) => {
     customerPhone,
     paymentMethod,
   } = data;
+
   let runningOrder = await prisma.runningOrder.findFirst({
     where: {
       restaurantId,
@@ -19,12 +21,14 @@ export const saveRunningOrderService = async (data: any) => {
       status: "ACTIVE",
     },
   });
+
   // CREATE NEW RUNNING ORDER
   if (!runningOrder) {
     runningOrder = await prisma.runningOrder.create({
       data: {
         restaurantId,
         branchId,
+        createdById,
         tableId,
         orderType,
         customerName,
@@ -36,6 +40,7 @@ export const saveRunningOrderService = async (data: any) => {
         paymentStatus: orderType === "DINE_IN" ? "UNPAID" : "PAID",
       },
     });
+
     // UPDATE TABLE STATUS
     if (orderType === "DINE_IN" && tableId) {
       await prisma.restaurantTable.updateMany({
@@ -51,6 +56,7 @@ export const saveRunningOrderService = async (data: any) => {
       });
     }
   }
+
   // CREATE BATCH
   const batch = await prisma.runningOrderBatch.create({
     data: {
@@ -70,11 +76,13 @@ export const saveRunningOrderService = async (data: any) => {
       items: true,
     },
   });
+
   // UPDATE RUNNING ORDER TOTAL
   const batchTotal = items.reduce(
     (sum: number, item: any) => sum + item.quantity * item.price,
     0,
   );
+
   await prisma.runningOrder.update({
     where: {
       id: runningOrder.id,
@@ -85,6 +93,7 @@ export const saveRunningOrderService = async (data: any) => {
       },
     },
   });
+
   // RETURN UPDATED ORDER
   return await prisma.runningOrder.findUnique({
     where: {
