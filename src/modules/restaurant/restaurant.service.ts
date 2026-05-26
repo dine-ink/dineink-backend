@@ -318,7 +318,6 @@ export const getRestaurantInsights = async (
     },
   });
 };
-
 export const createRestaurantTableService = async (body: any) => {
   const existing = await prisma.restaurantTable.findFirst({
     where: {
@@ -331,6 +330,27 @@ export const createRestaurantTableService = async (body: any) => {
     throw new Error("Table already exists");
   }
 
+  // ================= GET PARENT TABLE =================
+  let parentTable = null;
+
+  if (body.isTemporary && body.tempTableType === "SPLIT") {
+    parentTable = await prisma.restaurantTable.findUnique({
+      where: {
+        id: Number(body.parentTableIds),
+      },
+    });
+
+    if (!parentTable) {
+      throw new Error("Parent table not found");
+    }
+
+    // VALIDATION
+    if (Number(body.capacity) > (parentTable.capacity || 0)) {
+      throw new Error("Not enough seats available");
+    }
+  }
+
+  // ================= CREATE TEMP TABLE =================
   const table = await prisma.restaurantTable.create({
     data: {
       name: body.name,
@@ -350,6 +370,19 @@ export const createRestaurantTableService = async (body: any) => {
       branchId: body.branchId,
     },
   });
+
+  // ================= UPDATE PARENT TABLE =================
+  if (body.isTemporary && body.tempTableType === "SPLIT" && parentTable) {
+    await prisma.restaurantTable.update({
+      where: {
+        id: parentTable.id,
+      },
+
+      data: {
+        capacity: (parentTable.capacity || 0) - Number(body.capacity),
+      },
+    });
+  }
 
   return table;
 };
