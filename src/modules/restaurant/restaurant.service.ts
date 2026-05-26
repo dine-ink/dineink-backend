@@ -230,10 +230,10 @@ export const getBranchDetailsService = async (branchId: number) => {
     },
 
     include: {
+      billing: true,
       restaurant: {
         include: {
           menuItems: true,
-
           categories: true,
         },
       },
