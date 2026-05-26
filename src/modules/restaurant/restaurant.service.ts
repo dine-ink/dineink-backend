@@ -396,6 +396,7 @@ export const deleteRestaurantTableService = async (id: number) => {
     throw new Error("Table not found");
   }
 
+  // ================= CHECK ACTIVE ORDER =================
   const activeOrder = await prisma.runningOrder.findFirst({
     where: {
       tableId: id,
@@ -407,6 +408,29 @@ export const deleteRestaurantTableService = async (id: number) => {
     throw new Error("Cannot delete active table");
   }
 
+  // ================= RESTORE PARENT TABLE CAPACITY =================
+  if (table.isTemporary && table.tempTableType === "SPLIT") {
+    const parentId = Number(table.parentTableIds);
+    const parentTable = await prisma.restaurantTable.findUnique({
+      where: {
+        id: parentId,
+      },
+    });
+
+    if (parentTable) {
+      await prisma.restaurantTable.update({
+        where: {
+          id: parentId,
+        },
+
+        data: {
+          capacity: (parentTable.capacity || 0) + (table.capacity || 0),
+        },
+      });
+    }
+  }
+
+  // ================= DELETE TEMP TABLE =================
   await prisma.restaurantTable.delete({
     where: { id },
   });
