@@ -318,3 +318,65 @@ export const getRestaurantInsights = async (
     },
   });
 };
+
+export const createRestaurantTableService = async (body: any) => {
+  const existing = await prisma.restaurantTable.findFirst({
+    where: {
+      name: body.name,
+      branchId: body.branchId,
+    },
+  });
+
+  if (existing) {
+    throw new Error("Table already exists");
+  }
+
+  const table = await prisma.restaurantTable.create({
+    data: {
+      name: body.name,
+
+      capacity: body.capacity,
+
+      status: body.status || "AVAILABLE",
+
+      isTemporary: body.isTemporary || false,
+
+      tempTableType: body.tempTableType || null,
+
+      parentTableIds: body.parentTableIds || null,
+
+      restaurantId: body.restaurantId,
+
+      branchId: body.branchId,
+    },
+  });
+
+  return table;
+};
+
+export const deleteRestaurantTableService = async (id: number) => {
+  const table = await prisma.restaurantTable.findUnique({
+    where: { id },
+  });
+
+  if (!table) {
+    throw new Error("Table not found");
+  }
+
+  const activeOrder = await prisma.runningOrder.findFirst({
+    where: {
+      tableId: id,
+      status: "RUNNING",
+    },
+  });
+
+  if (activeOrder) {
+    throw new Error("Cannot delete active table");
+  }
+
+  await prisma.restaurantTable.delete({
+    where: { id },
+  });
+
+  return true;
+};

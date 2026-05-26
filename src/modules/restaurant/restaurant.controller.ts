@@ -8,6 +8,8 @@ import {
   updateBranchDetailsService,
   getRestaurantStaffData,
   getTablesService,
+  createRestaurantTableService,
+  deleteRestaurantTableService,
 } from "./restaurant.service";
 
 export const setupRestaurant = async (req: any, res: Response) => {
@@ -140,6 +142,44 @@ export const getTablesController = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+export const createRestaurantTable = async (req: Request, res: Response) => {
+  try {
+    const table = await createRestaurantTableService(req.body);
+
+    return res.status(201).json({
+      success: true,
+      data: table,
+    });
+  } catch (error: any) {
+    console.log(error);
+
+    return res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+export const deleteRestaurantTable = async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+
+    await deleteRestaurantTableService(id);
+
+    return res.status(200).json({
+      success: true,
+      message: "Table deleted",
+    });
+  } catch (error: any) {
+    console.log(error);
+
+    return res.status(400).json({
       success: false,
       message: error.message,
     });

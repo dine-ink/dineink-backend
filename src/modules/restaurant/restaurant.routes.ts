@@ -8,6 +8,8 @@ import {
   updateBranchDetails,
   getRestaurantStaff,
   getTablesController,
+  createRestaurantTable,
+  deleteRestaurantTable,
 } from "./restaurant.controller";
 
 import { authMiddleware } from "../../middleware/auth";
@@ -22,5 +24,10 @@ router.get("/branch/:id", authMiddleware, getBranchDetails);
 router.put("/branch/:id", authMiddleware, updateBranchDetails);
 router.get("/staff/:restaurantId/:branchId", getRestaurantStaff);
 router.get("/table/:restaurantId/:branchId", getTablesController);
-
+router.post("/restaurant-table/create", authMiddleware, createRestaurantTable);
+router.delete(
+  "/restaurant-table/delete/:id",
+  authMiddleware,
+  deleteRestaurantTable,
+);
 export default router;
