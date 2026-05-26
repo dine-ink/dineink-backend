@@ -223,7 +223,8 @@ export const getMyRestaurantService = async (userId: number) => {
 };
 
 export const getBranchDetailsService = async (branchId: number) => {
-  return prisma.branch.findUnique({
+  // ================= BRANCH DATA =================
+  const branch = await prisma.branch.findUnique({
     where: {
       id: branchId,
     },
@@ -232,6 +233,7 @@ export const getBranchDetailsService = async (branchId: number) => {
       restaurant: {
         include: {
           menuItems: true,
+
           categories: true,
         },
       },
@@ -245,6 +247,80 @@ export const getBranchDetailsService = async (branchId: number) => {
       },
     },
   });
+
+  if (!branch) {
+    return null;
+  }
+
+  // ================= LAST 30 DAYS =================
+  const startDate = new Date();
+
+  startDate.setDate(startDate.getDate() - 30);
+
+  // ================= FETCH BILLS =================
+  const bills = await prisma.bill.findMany({
+    where: {
+      restaurantId: branch.restaurantId,
+
+      branchId: branch.id,
+
+      createdAt: {
+        gte: startDate,
+      },
+    },
+
+    include: {
+      items: true,
+    },
+  });
+
+  // ================= ITEM MAP =================
+  const itemMap: Record<
+    number,
+    {
+      quantity: number;
+
+      item: any;
+    }
+  > = {};
+
+  bills.forEach((bill) => {
+    bill.items.forEach((item) => {
+      if (!item.menuItemId) {
+        return;
+      }
+      if (!itemMap[item.menuItemId]) {
+        const menuItem = branch.restaurant.menuItems.find(
+          (m) => m.id === item.menuItemId,
+        );
+
+        itemMap[item.menuItemId] = {
+          quantity: 0,
+
+          item: menuItem,
+        };
+      }
+
+      itemMap[item.menuItemId].quantity += item.quantity;
+    });
+  });
+
+  // ================= TOP ITEMS =================
+  const topSellingItems = Object.values(itemMap)
+    .sort((a: any, b: any) => b.quantity - a.quantity)
+    .slice(0, 10)
+    .map((i: any) => ({
+      ...i.item,
+
+      soldQuantity: i.quantity,
+    }));
+
+  // ================= RETURN =================
+  return {
+    ...branch,
+
+    topSellingItems,
+  };
 };
 
 export const updateBranchDetailsService = async (
