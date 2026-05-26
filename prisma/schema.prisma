@@ -215,16 +215,21 @@ model BillItem {
 }
 
 model RestaurantTable {
-  id           Int      @id @default(autoincrement())
-  name         String
-  capacity     Int?
-  status       String   @default("AVAILABLE")
-  restaurantId Int
-  branchId     Int
-  branch       Branch   @relation(fields: [branchId], references: [id])
-  runningOrders RunningOrder[]
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                Int      @id @default(autoincrement())
+  name              String
+  capacity          Int?
+  status            String   @default("AVAILABLE")
+
+  isTemporary       Boolean  @default(false)
+  tempTableType     String?
+  parentTableIds    String?
+
+  restaurantId      Int
+  branchId          Int
+  branch             Branch   @relation(fields: [branchId], references: [id])
+  runningOrders      RunningOrder[]
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }
 
 model RunningOrder {
