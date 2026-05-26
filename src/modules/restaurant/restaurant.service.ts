@@ -370,6 +370,23 @@ export const createRestaurantTableService = async (body: any) => {
       branchId: body.branchId,
     },
   });
+  if (body.isTemporary && body.tempTableType === "MERGE") {
+    const parentIds = body.parentTableIds
+      .split(",")
+      .map((id: string) => Number(id));
+
+    await prisma.restaurantTable.updateMany({
+      where: {
+        id: {
+          in: parentIds,
+        },
+      },
+
+      data: {
+        status: "OCCUPIED",
+      },
+    });
+  }
 
   // ================= UPDATE PARENT TABLE =================
   if (body.isTemporary && body.tempTableType === "SPLIT" && parentTable) {
@@ -429,7 +446,22 @@ export const deleteRestaurantTableService = async (id: number) => {
       });
     }
   }
+  if (table.isTemporary && table.tempTableType === "MERGE") {
+    const parentIds =
+      table.parentTableIds?.split(",").map((id: string) => Number(id)) || [];
 
+    await prisma.restaurantTable.updateMany({
+      where: {
+        id: {
+          in: parentIds,
+        },
+      },
+
+      data: {
+        status: "AVAILABLE",
+      },
+    });
+  }
   // ================= DELETE TEMP TABLE =================
   await prisma.restaurantTable.delete({
     where: { id },
