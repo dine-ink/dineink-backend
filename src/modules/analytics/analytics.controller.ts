@@ -19,10 +19,16 @@ export const getRestaurantDashboardOverview = async (
 
     const range = req.query.range as string;
 
+    const from = req.query.from as string;
+
+    const to = req.query.to as string;
+
     const data = await getDashboardOverviewService(
       restaurantId,
       branchId,
       range,
+      from,
+      to,
     );
 
     return res.status(200).json({
@@ -30,6 +36,8 @@ export const getRestaurantDashboardOverview = async (
       data,
     });
   } catch (error: any) {
+    console.log(error);
+
     return res.status(400).json({
       success: false,
       message: error.message,

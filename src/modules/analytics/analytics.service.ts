@@ -4,23 +4,54 @@ export const getDashboardOverviewService = async (
   restaurantId: number,
   branchId?: number | null,
   range = "today",
+  from?: string,
+  to?: string,
 ) => {
   let startDate = new Date();
-  switch (range) {
-    case "today":
-      startDate.setHours(0, 0, 0, 0);
-      break;
-    case "week":
-      startDate.setDate(startDate.getDate() - 6);
-      break;
-    case "month":
-      startDate = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
-      break;
-    case "quarter":
-      startDate.setMonth(startDate.getMonth() - 3);
-      break;
-    default:
-      startDate.setHours(0, 0, 0, 0);
+
+  let endDate = new Date();
+
+  if (range === "custom" && from && to) {
+    startDate = new Date(from);
+
+    endDate = new Date(to);
+
+    endDate.setHours(23, 59, 59, 999);
+  } else {
+    switch (range) {
+      case "today":
+        startDate.setHours(0, 0, 0, 0);
+
+        endDate.setHours(23, 59, 59, 999);
+
+        break;
+
+      case "week":
+        startDate.setDate(startDate.getDate() - 6);
+
+        endDate.setHours(23, 59, 59, 999);
+
+        break;
+
+      case "month":
+        startDate = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+
+        endDate.setHours(23, 59, 59, 999);
+
+        break;
+
+      case "quarter":
+        startDate.setMonth(startDate.getMonth() - 3);
+
+        endDate.setHours(23, 59, 59, 999);
+
+        break;
+
+      default:
+        startDate.setHours(0, 0, 0, 0);
+
+        endDate.setHours(23, 59, 59, 999);
+    }
   }
 
   const bills = await prisma.bill.findMany({
@@ -31,6 +62,7 @@ export const getDashboardOverviewService = async (
       }),
       createdAt: {
         gte: startDate,
+        lte: endDate,
       },
     },
     include: {
