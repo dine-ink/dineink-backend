@@ -171,7 +171,13 @@ model Bill {
   billNo        String     @unique
   orderType     String
   paymentMethod String
+  cgst           Float? @default(0)
 
+  sgst           Float? @default(0)
+
+  serviceCharge  Float? @default(0)
+
+  packingCharge  Float? @default(0)
   // PAYMENT STATUS
   status        BillStatus
 
@@ -244,7 +250,21 @@ model RunningOrder {
   customerName   String?
   customerPhone  String?
   paymentMethod  String?
+  subtotal        Float? @default(0)
 
+  discountAmount  Float? @default(0)
+
+  packingCharge   Float? @default(0)
+
+  serviceCharge   Float? @default(0)
+
+  gstAmount       Float? @default(0)
+
+  cgst            Float? @default(0)
+
+  sgst            Float? @default(0)
+
+  finalAmount     Float? @default(0)
   // ORDER FLOW STATUS
   orderStatus    String   @default("ACTIVE")
 

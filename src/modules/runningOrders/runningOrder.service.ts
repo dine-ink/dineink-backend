@@ -10,7 +10,17 @@ export const saveRunningOrderService = async (data: any) => {
     orderType,
     customerName,
     customerPhone,
+    customerAddress,
     paymentMethod,
+
+    subtotal,
+    discountAmount,
+    packingCharge,
+    serviceCharge,
+    gstAmount,
+    cgst,
+    sgst,
+    finalAmount,
   } = data;
 
   let runningOrder = await prisma.runningOrder.findFirst({
@@ -38,6 +48,21 @@ export const saveRunningOrderService = async (data: any) => {
         status: "ACTIVE",
         totalAmount: 0,
         paymentStatus: orderType === "DINE_IN" ? "UNPAID" : "PAID",
+        subtotal: orderType !== "DINE_IN" ? subtotal : null,
+
+        discountAmount: orderType !== "DINE_IN" ? discountAmount : null,
+
+        packingCharge: orderType !== "DINE_IN" ? packingCharge : null,
+
+        serviceCharge: orderType !== "DINE_IN" ? serviceCharge : null,
+
+        gstAmount: orderType !== "DINE_IN" ? gstAmount : null,
+
+        cgst: orderType !== "DINE_IN" ? cgst : null,
+
+        sgst: orderType !== "DINE_IN" ? sgst : null,
+
+        finalAmount: orderType !== "DINE_IN" ? finalAmount : null,
       },
     });
 
@@ -141,6 +166,15 @@ export const closeRunningOrderService = async (data: any) => {
     paymentMethod,
     orderType,
     orderStatus,
+
+    subtotal,
+    gstAmount,
+    cgst,
+    sgst,
+    discountAmount,
+    serviceCharge,
+    packingCharge,
+    finalAmount,
   } = data;
   const runningOrder = await prisma.runningOrder.findUnique({
     where: {
@@ -177,18 +211,28 @@ export const closeRunningOrderService = async (data: any) => {
     });
   }
   const allItems = runningOrder.batches.flatMap((batch) => batch.items);
-  const subtotal = allItems.reduce((acc, item) => acc + item.total, 0);
   const bill = await prisma.bill.create({
     data: {
       billNo: `BILL-${Date.now()}`,
       restaurantId: runningOrder.restaurantId,
       branchId: runningOrder.branchId,
       customerId: customer.id,
-      status: "PAID",
+      status: paymentMethod ? "PAID" : "UNPAID",
       subtotal,
-      gst: 0,
-      discount: 0,
-      total: subtotal,
+
+      gst: gstAmount,
+
+      cgst,
+
+      sgst,
+
+      discount: discountAmount,
+
+      serviceCharge,
+
+      packingCharge,
+
+      total: finalAmount,
       paymentMethod,
       orderType,
       orderStatus: orderStatus,
