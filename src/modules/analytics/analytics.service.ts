@@ -203,12 +203,16 @@ export const getDashboardOverviewService = async (
   });
 
   const formatHour = (hour: number) => {
-    const start = hour % 12 || 12;
-    const end = (hour + 1) % 12 || 12;
-    const period = hour >= 12 ? "PM" : "AM";
-    return `${start} ${period} - ${end} ${period}`;
-  };
+    const startHour = hour % 12 || 12;
 
+    const endHour = (hour + 1) % 12 || 12;
+
+    const startPeriod = hour >= 12 ? "PM" : "AM";
+
+    const endPeriod = hour + 1 >= 12 && hour + 1 < 24 ? "PM" : "AM";
+
+    return `${startHour} ${startPeriod} - ${endHour} ${endPeriod}`;
+  };
   const peakHours = formatHour(peakHour);
 
   return {
