@@ -214,41 +214,57 @@ export const closeRunningOrderService = async (data: any) => {
   const bill = await prisma.bill.create({
     data: {
       billNo: `BILL-${Date.now()}`,
+
       restaurantId: runningOrder.restaurantId,
+
       branchId: runningOrder.branchId,
+
       customerId: customer.id,
+
       status: paymentMethod ? "PAID" : "UNPAID",
-      subtotal,
 
-      gst: gstAmount,
+      subtotal: runningOrder.subtotal || 0,
 
-      cgst,
+      gst: runningOrder.gstAmount || 0,
 
-      sgst,
+      cgst: runningOrder.cgst || 0,
 
-      discount: discountAmount,
+      sgst: runningOrder.sgst || 0,
 
-      serviceCharge,
+      discount: runningOrder.discountAmount || 0,
 
-      packingCharge,
+      serviceCharge: runningOrder.serviceCharge || 0,
 
-      total: finalAmount,
+      packingCharge: runningOrder.packingCharge || 0,
+
+      total: runningOrder.finalAmount || runningOrder.totalAmount || 0,
+
       paymentMethod,
+
       orderType,
-      orderStatus: orderStatus,
+
+      orderStatus: orderStatus || "COMPLETED",
+
       createdById: runningOrder.createdById,
+
       items: {
         create: allItems.map((item) => ({
           menuItemId: item.menuItemId,
+
           itemName: item.itemName,
+
           quantity: item.quantity,
+
           price: item.price,
+
           total: item.total,
         })),
       },
     },
+
     include: {
       customer: true,
+
       items: true,
     },
   });
