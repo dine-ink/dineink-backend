@@ -21,35 +21,18 @@ export const getRestaurantSettingsService = async (restaurantId: number) => {
 export const updateBranchesService = async (body: any) => {
   const { restaurantId, branches } = body;
 
-  for (const branch of branches) {
-    if (branch.id) {
-      await prisma.branch.update({
-        where: {
-          id: branch.id,
-        },
-
-        data: {
-          name: branch.name,
-
-          address: branch.address,
-
-          phone: branch.phone,
-        },
-      });
-    } else {
-      await prisma.branch.create({
-        data: {
-          restaurantId,
-
-          name: branch.name,
-
-          address: branch.address,
-
-          phone: branch.phone,
-        },
-      });
-    }
-  }
+  await Promise.all(
+    branches.map((branch: any) =>
+      branch.id
+        ? prisma.branch.update({
+            where: { id: branch.id },
+            data: { name: branch.name, address: branch.address, phone: branch.phone },
+          })
+        : prisma.branch.create({
+            data: { restaurantId, name: branch.name, address: branch.address, phone: branch.phone },
+          }),
+    ),
+  );
 
   return true;
 };

@@ -203,6 +203,8 @@ model Bill {
   customer      Customer?  @relation(fields: [customerId], references: [id])
   items         BillItem[]
   @@index([restaurantId])
+  @@index([restaurantId, branchId, createdAt])
+  @@index([restaurantId, createdAt])
 }
 
 
@@ -287,13 +289,14 @@ model RunningOrder {
   @@index([restaurantId])
   @@index([branchId])
   @@index([tableId])
+  @@index([restaurantId, branchId, status])
 }
 
 model RunningOrderBatch {
   id               Int      @id @default(autoincrement())
   runningOrderId   Int
   createdAt        DateTime @default(now())
-  runningOrder RunningOrder @relation(fields: [runningOrderId], references: [id])
+  runningOrder RunningOrder @relation(fields: [runningOrderId], references: [id], onDelete: Cascade)
   items RunningOrderBatchItem[]
 }
 
@@ -307,7 +310,7 @@ model RunningOrderBatchItem {
   total                 Float
   status                String @default("PENDING")
   createdAt             DateTime @default(now())
-  runningOrderBatch RunningOrderBatch @relation(fields: [runningOrderBatchId], references: [id])
+  runningOrderBatch RunningOrderBatch @relation(fields: [runningOrderBatchId], references: [id], onDelete: Cascade)
 }
 
 model Order {

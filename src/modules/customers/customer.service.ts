@@ -3,80 +3,68 @@ import prisma from "../../config/prisma";
 export const getCustomersByBranchService = async (
   restaurantId: number,
   branchId?: number | null,
+  page = 1,
+  limit = 100,
 ) => {
   const customers = await prisma.customer.findMany({
     where: {
       restaurantId,
-      ...(branchId && {
-        bills: {
-          some: {
-            branchId,
-          },
-        },
-      }),
+      ...(branchId && { bills: { some: { branchId } } }),
     },
-    include: {
+    select: {
+      id: true,
+      name: true,
+      phone: true,
+      email: true,
+      address: true,
+      createdAt: true,
       bills: {
-        where: {
-          ...(branchId && {
-            branchId,
-          }),
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
+        where: { ...(branchId && { branchId }) },
+        select: { total: true, createdAt: true },
+        orderBy: { createdAt: "desc" },
       },
     },
-    orderBy: {
-      createdAt: "desc",
-    },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    skip: (page - 1) * limit,
   });
-  return customers.map((customer) => {
-    const visits = customer.bills.length;
-    const spend = customer.bills.reduce((sum, bill) => sum + bill.total, 0);
-    const lastVisit = customer.bills[0]?.createdAt;
-    return {
-      ...customer,
-      visits,
-      spend,
-      lastVisit,
-    };
-  });
+
+  return customers.map(({ bills, ...customer }) => ({
+    ...customer,
+    visits: bills.length,
+    spend: bills.reduce((sum, bill) => sum + bill.total, 0),
+    lastVisit: bills[0]?.createdAt ?? null,
+  }));
 };
-export const getCustomersByRestaurantService = async (restaurantId: number) => {
-  const customers = await prisma.customer.findMany({
-    where: {
-      restaurantId,
-    },
 
-    include: {
+export const getCustomersByRestaurantService = async (
+  restaurantId: number,
+  page = 1,
+  limit = 100,
+) => {
+  const customers = await prisma.customer.findMany({
+    where: { restaurantId },
+    select: {
+      id: true,
+      name: true,
+      phone: true,
+      email: true,
+      address: true,
+      createdAt: true,
       bills: {
-        orderBy: {
-          createdAt: "desc",
-        },
+        select: { total: true, createdAt: true },
+        orderBy: { createdAt: "desc" },
       },
     },
-
-    orderBy: {
-      createdAt: "desc",
-    },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    skip: (page - 1) * limit,
   });
 
-  return customers.map((customer) => {
-    const visits = customer.bills.length;
-
-    const spend = customer.bills.reduce((sum, bill) => sum + bill.total, 0);
-
-    const lastVisit = customer.bills[0]?.createdAt;
-
-    return {
-      ...customer,
-
-      visits,
-
-      spend,
-
-      lastVisit,
-    };
-  });
+  return customers.map(({ bills, ...customer }) => ({
+    ...customer,
+    visits: bills.length,
+    spend: bills.reduce((sum, bill) => sum + bill.total, 0),
+    lastVisit: bills[0]?.createdAt ?? null,
+  }));
 };

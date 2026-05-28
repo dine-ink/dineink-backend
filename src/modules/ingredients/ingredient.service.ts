@@ -3,17 +3,12 @@ import prisma from "../../config/prisma";
 
 export const generateIngredients = async (restaurantId: number) => {
   const menuItems = await prisma.menuItem.findMany({
-    where: {
-      restaurantId,
-    },
-    select: {
-      name: true,
-    },
+    where: { restaurantId },
+    select: { name: true },
   });
   const menu = menuItems.map((item) => item.name);
-  if (!menu.length) {
-    throw new Error("No menu items found");
-  }
+  if (!menu.length) throw new Error("No menu items found");
+
   const prompt = `
   You are an expert restaurant inventory analyst.
   Based on these menu items:
@@ -47,13 +42,8 @@ export const generateIngredients = async (restaurantId: number) => {
   `;
 
   const response = await openai.chat.completions.create({
-    model: "gpt-5.4-mini",
-    messages: [
-      {
-        role: "user",
-        content: prompt,
-      },
-    ],
+    model: "gpt-4o-mini",
+    messages: [{ role: "user", content: prompt }],
   });
   const content = response.choices[0].message.content || "{}";
   return JSON.parse(content);
@@ -64,152 +54,103 @@ export const saveIngredients = async (
   branchId: number,
   ingredients: any,
 ) => {
-  for (const categoryName in ingredients) {
-    let category = await prisma.ingredientCategory.findFirst({
-      where: {
-        restaurantId,
-        name: categoryName,
-      },
+  const categoryNames = Object.keys(ingredients);
+
+  // ── Phase 1: Batch-fetch then batch-create missing categories ───────────────
+  const existingCategories = await prisma.ingredientCategory.findMany({
+    where: { restaurantId, name: { in: categoryNames } },
+  });
+  const existingCategoryNames = new Set(existingCategories.map((c) => c.name));
+  const missingCategoryNames = categoryNames.filter((n) => !existingCategoryNames.has(n));
+
+  if (missingCategoryNames.length) {
+    await prisma.ingredientCategory.createMany({
+      data: missingCategoryNames.map((name) => ({ name, restaurantId })),
+      skipDuplicates: true,
     });
+  }
 
-    /* =====================================================
-       CREATE CATEGORY
-    ===================================================== */
+  const allCategories = await prisma.ingredientCategory.findMany({
+    where: { restaurantId, name: { in: categoryNames } },
+  });
+  const categoryMap = new Map(allCategories.map((c) => [c.name, c.id]));
 
-    if (!category) {
-      category = await prisma.ingredientCategory.create({
-        data: {
-          name: categoryName,
-          restaurantId,
-        },
-      });
+  // ── Phase 2: Collect all items, batch-fetch existing ingredients ────────────
+  const allItems: Array<{ categoryName: string; item: any }> = [];
+  for (const [categoryName, items] of Object.entries(ingredients)) {
+    for (const item of items as any[]) {
+      if (item.name?.trim()) allItems.push({ categoryName, item });
     }
+  }
 
-    const items = ingredients[categoryName];
+  const ingredientNames = allItems.map(({ item }) => item.name.trim());
 
-    for (const item of items) {
-      if (!item.name || item.name.trim() === "") {
-        continue;
-      }
+  const existingIngredients = await prisma.ingredient.findMany({
+    where: { restaurantId, name: { in: ingredientNames } },
+    select: { id: true, name: true },
+  });
+  const existingMap = new Map(existingIngredients.map((i) => [i.name, i.id]));
 
-      /* =====================================================
-         NUMBER CONVERSION
-      ===================================================== */
+  const toUpdate: any[] = [];
+  const toCreate: any[] = [];
 
-      const quantity =
-        item.quantity !== "" && item.quantity !== null
-          ? Number(item.quantity)
-          : null;
+  for (const { categoryName, item } of allItems) {
+    const categoryId = categoryMap.get(categoryName);
+    const quantity = item.quantity !== "" && item.quantity != null ? Number(item.quantity) : null;
+    const purchasePrice = item.purchasePrice !== "" && item.purchasePrice != null ? Number(item.purchasePrice) : null;
+    const pricePerUnit = item.pricePerUnit !== "" && item.pricePerUnit != null ? Number(item.pricePerUnit) : null;
+    const name = item.name.trim();
 
-      const purchasePrice =
-        item.purchasePrice !== "" && item.purchasePrice !== null
-          ? Number(item.purchasePrice)
-          : null;
-
-      const pricePerUnit =
-        item.pricePerUnit !== "" && item.pricePerUnit !== null
-          ? Number(item.pricePerUnit)
-          : null;
-
-      /* =====================================================
-         FIND EXISTING INGREDIENT
-      ===================================================== */
-
-      const existingIngredient = await prisma.ingredient.findFirst({
-        where: {
-          restaurantId,
-          name: item.name.trim(),
-        },
-      });
-
-      let ingredient: any;
-
-      /* =====================================================
-         UPDATE INGREDIENT
-      ===================================================== */
-
-      if (existingIngredient) {
-        ingredient = await prisma.ingredient.update({
-          where: {
-            id: existingIngredient.id,
-          },
-
-          data: {
-            quantity,
-            unit: item.unit || "Kg",
-            purchasePrice,
-            pricePerUnit,
-            categoryId: category.id,
-          },
-        });
-      } else {
-
-      /* =====================================================
-         CREATE INGREDIENT
-      ===================================================== */
-        ingredient = await prisma.ingredient.create({
-          data: {
-            name: item.name.trim(),
-
-            restaurantId,
-
-            categoryId: category.id,
-
-            quantity,
-
-            unit: item.unit || "Kg",
-
-            purchasePrice,
-
-            pricePerUnit,
-
-            isAiGenerated: true,
-          },
-        });
-      }
-
-      /* =====================================================
-         SAVE BRANCH VENDOR MAPPING
-      ===================================================== */
-
-      if (item.vendorId) {
-        await prisma.ingredientVendor.upsert({
-          where: {
-            branchId_ingredientId: {
-              branchId,
-              ingredientId: ingredient.id,
-            },
-          },
-
-          update: {
-            vendorId: Number(item.vendorId),
-          },
-
-          create: {
-            branchId,
-
-            ingredientId: ingredient.id,
-
-            vendorId: Number(item.vendorId),
-          },
-        });
-      }
+    if (existingMap.has(name)) {
+      toUpdate.push({ id: existingMap.get(name), quantity, unit: item.unit || "Kg", purchasePrice, pricePerUnit, categoryId });
+    } else {
+      toCreate.push({ name, restaurantId, categoryId, quantity, unit: item.unit || "Kg", purchasePrice, pricePerUnit, isAiGenerated: true });
     }
+  }
+
+  // Run updates in parallel + batch-create new ones
+  await Promise.all([
+    ...toUpdate.map(({ id, ...data }) => prisma.ingredient.update({ where: { id }, data })),
+    toCreate.length
+      ? prisma.ingredient.createMany({ data: toCreate, skipDuplicates: true })
+      : Promise.resolve(),
+  ]);
+
+  // ── Phase 3: Batch vendor mappings ──────────────────────────────────────────
+  const vendorItems = allItems.filter(({ item }) => item.vendorId);
+  if (vendorItems.length) {
+    // Re-fetch to get IDs of newly created ingredients
+    const freshIngredients = await prisma.ingredient.findMany({
+      where: { restaurantId, name: { in: vendorItems.map(({ item }) => item.name.trim()) } },
+      select: { id: true, name: true },
+    });
+    const ingredientIdMap = new Map(freshIngredients.map((i) => [i.name, i.id]));
+
+    await Promise.all(
+      vendorItems
+        .map(({ item }) => ({
+          ingredientId: ingredientIdMap.get(item.name.trim()),
+          vendorId: Number(item.vendorId),
+        }))
+        .filter((m) => m.ingredientId)
+        .map(({ ingredientId, vendorId }) =>
+          prisma.ingredientVendor.upsert({
+            where: { branchId_ingredientId: { branchId, ingredientId: ingredientId! } },
+            update: { vendorId },
+            create: { branchId, ingredientId: ingredientId!, vendorId },
+          }),
+        ),
+    );
   }
 
   return true;
 };
+
 export const getIngredients = async (restaurantId: number) => {
   const categories = await prisma.ingredientCategory.findMany({
-    where: {
-      restaurantId,
-    },
-    include: {
-      ingredients: true,
-    },
-    orderBy: {
-      id: "asc",
-    },
+    where: { restaurantId },
+    include: { ingredients: true },
+    orderBy: { id: "asc" },
   });
   const formatted: any = {};
   for (const category of categories) {
@@ -228,28 +169,19 @@ export const getIngredients = async (restaurantId: number) => {
 export const aiSuggestMappingData = async (restaurantId: number, body: any) => {
   const { menuItemId } = body;
 
-  // GET MENU ITEM
+  const [menuItem, ingredients] = await Promise.all([
+    prisma.menuItem.findFirst({
+      where: { id: menuItemId, restaurantId },
+    }),
+    prisma.ingredient.findMany({
+      where: { restaurantId },
+      select: { id: true, name: true },
+    }),
+  ]);
 
-  const menuItem = await prisma.menuItem.findFirst({
-    where: {
-      id: menuItemId,
-      restaurantId,
-    },
-  });
+  if (!menuItem) throw new Error("Menu item not found");
 
-  if (!menuItem) {
-    throw new Error("Menu item not found");
-  }
-
-  // GET RESTAURANT INGREDIENTS
-
-  const ingredients = await prisma.ingredient.findMany({
-    where: {
-      restaurantId,
-    },
-  });
-
-  const ingredientNames = ingredients.map((i: any) => i.name);
+  const ingredientNames = ingredients.map((i) => i.name);
 
   const prompt = `
     You are a professional restaurant chef and recipe assistant.
@@ -283,49 +215,35 @@ export const aiSuggestMappingData = async (restaurantId: number, body: any) => {
     `;
 
   const completion = await openai.chat.completions.create({
-    model: "gpt-4.1-mini",
-
-    messages: [
-      {
-        role: "user",
-        content: prompt,
-      },
-    ],
-
+    model: "gpt-4o-mini",
+    messages: [{ role: "user", content: prompt }],
     temperature: 0.3,
   });
 
   const responseText = completion.choices[0]?.message?.content || "[]";
 
   let parsed: any[] = [];
-
   try {
-    parsed = JSON.parse(responseText);
-  } catch (err) {
-    console.log("JSON Parse Error", err);
-
+    const result = JSON.parse(responseText);
+    if (Array.isArray(result)) parsed = result;
+  } catch {
     parsed = [];
   }
 
-  const mapped = parsed.map((item: any) => {
-    const matchedIngredient = ingredients.find(
-      (i: any) => i.name.toLowerCase() === item.ingredientName?.toLowerCase(),
-    );
-
-    return {
-      ingredientId: matchedIngredient?.id,
-
-      ingredient: matchedIngredient,
-
-      quantity: item.quantity || 1,
-
-      unit: item.unit || "gm",
-
-      wastage: 0,
-    };
-  });
-
-  return mapped.filter((i: any) => i.ingredientId);
+  return parsed
+    .map((item: any) => {
+      const matchedIngredient = ingredients.find(
+        (i) => i.name.toLowerCase() === item.ingredientName?.toLowerCase(),
+      );
+      return {
+        ingredientId: matchedIngredient?.id,
+        ingredient: matchedIngredient,
+        quantity: item.quantity || 1,
+        unit: item.unit || "gm",
+        wastage: 0,
+      };
+    })
+    .filter((i: any) => i.ingredientId);
 };
 
 export const uploadVendors = async (
@@ -333,62 +251,51 @@ export const uploadVendors = async (
   branchId: number,
   vendors: any[],
 ) => {
-  for (const vendor of vendors) {
-    if (!vendor["Vendor Name"]) {
-      continue;
-    }
+  const validVendors = vendors.filter((v) => v["Vendor Name"]?.trim());
+  if (!validVendors.length) return true;
 
-    const existing = await prisma.vendor.findFirst({
-      where: {
-        restaurantId,
-        branchId,
-        name: vendor["Vendor Name"].trim(),
-      },
-    });
+  const names = validVendors.map((v) => v["Vendor Name"].trim());
 
-    if (existing) {
-      await prisma.vendor.update({
-        where: {
-          id: existing.id,
-        },
+  // Batch-fetch existing vendors in one query
+  const existing = await prisma.vendor.findMany({
+    where: { restaurantId, branchId, name: { in: names } },
+    select: { id: true, name: true },
+  });
+  const existingMap = new Map(existing.map((v) => [v.name, v.id]));
 
+  await Promise.all([
+    // Update existing vendors in parallel
+    ...existing.map((v) => {
+      const src = validVendors.find((vd) => vd["Vendor Name"].trim() === v.name);
+      return prisma.vendor.update({
+        where: { id: v.id },
         data: {
-          address: vendor["Address"] || null,
-
-          phone: vendor["Phone Number"] ? String(vendor["Phone Number"]) : null,
+          address: src?.["Address"] || null,
+          phone: src?.["Phone Number"] ? String(src["Phone Number"]) : null,
         },
       });
-    } else {
-      await prisma.vendor.create({
-        data: {
+    }),
+    // Create new vendors in one batch
+    prisma.vendor.createMany({
+      data: validVendors
+        .filter((v) => !existingMap.has(v["Vendor Name"].trim()))
+        .map((v) => ({
           restaurantId,
           branchId,
-
-          name: vendor["Vendor Name"].trim(),
-
-          address: vendor["Address"] || null,
-
-          phone: vendor["Phone Number"] ? String(vendor["Phone Number"]) : null,
-        },
-      });
-    }
-  }
+          name: v["Vendor Name"].trim(),
+          address: v["Address"] || null,
+          phone: v["Phone Number"] ? String(v["Phone Number"]) : null,
+        })),
+      skipDuplicates: true,
+    }),
+  ]);
 
   return true;
 };
 
-export const fetchVendorsData = async (
-  restaurantId: number,
-  branchId: number,
-) => {
+export const fetchVendorsData = async (restaurantId: number, branchId: number) => {
   return prisma.vendor.findMany({
-    where: {
-      restaurantId,
-      branchId,
-    },
-
-    orderBy: {
-      name: "asc",
-    },
+    where: { restaurantId, branchId },
+    orderBy: { name: "asc" },
   });
 };
