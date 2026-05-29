@@ -25,189 +25,202 @@ enum BillStatus {
 }
 
 model Restaurant {
-  id        Int     @id @default(autoincrement())
-  name      String
-  email     String? 
-  phone     String?
-  address   String?
-  gstNumber String?
-  insights  RestaurantInsights[]
-  ownerId Int?
-  owner   User? @relation("RestaurantOwner", fields: [ownerId], references: [id])
-  users User[] @relation("RestaurantUsers")
-  vendors Vendor[]  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  inventoryRestocks InventoryRestock[]
-  branches   Branch[]
-  categories Category[]
-  menuItems  MenuItem[]
-  customers  Customer[]
-  bills      Bill[]
-  runningOrders RunningOrder[]
-  orders  Order[]
-  logo String?
+  id                   Int                   @id @default(autoincrement())
+  name                 String
+  email                String?
+  phone                String?
+  address              String?
+  gstNumber            String?
+  insights             RestaurantInsights[]
+  ownerId              Int?
+  owner                User?                 @relation("RestaurantOwner", fields: [ownerId], references: [id])
+  users                User[]                @relation("RestaurantUsers")
+  vendors              Vendor[]
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  inventoryRestocks    InventoryRestock[]
+  branches             Branch[]
+  categories           Category[]
+  menuItems            MenuItem[]
+  customers            Customer[]
+  bills                Bill[]
+  runningOrders        RunningOrder[]
+  orders               Order[]
+  logo                 String?
   ingredientCategories IngredientCategory[]
   ingredients          Ingredient[]
-  @@index([ownerId]) 
+  attendances          Attendance[]
+  dailyCashSessions    DailyCashSession[]
+  shopExpenses         ShopExpense[]
+  inventoryAdjustments InventoryAdjustment[]
+
+  @@index([ownerId])
 }
+
 model Branch {
-  id           Int               @id @default(autoincrement())
-  name         String
-  address      String?
-  phone        String?
-  email        String?
-  restaurantId Int
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
-  city         String? 
-  state        String? 
-  pincode      String? 
-  menuItems    MenuItem[]
-  tables       RestaurantTable[]
-  isActive     Boolean           @default(true) 
-  restaurant   Restaurant        @relation(fields: [restaurantId], references: [id])
-  users        User[]
-  bills        Bill[]
-  orders       Order[]
-  runningOrders RunningOrder[]
-  isDeleted    Boolean           @default(false)
-  inventoryRestocks InventoryRestock[]
-  vendors Vendor[]
-  billing BillingSettings? 
-  insights  RestaurantInsights[]
-  ingredientVendors IngredientVendor[]
+  id                   Int                   @id @default(autoincrement())
+  name                 String
+  address              String?
+  phone                String?
+  email                String?
+  restaurantId         Int
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  city                 String?
+  state                String?
+  pincode              String?
+  menuItems            MenuItem[]
+  tables               RestaurantTable[]
+  isActive             Boolean               @default(true)
+  restaurant           Restaurant            @relation(fields: [restaurantId], references: [id])
+  users                User[]
+  bills                Bill[]
+  orders               Order[]
+  runningOrders        RunningOrder[]
+  isDeleted            Boolean               @default(false)
+  inventoryRestocks    InventoryRestock[]
+  vendors              Vendor[]
+  billing              BillingSettings?
+  insights             RestaurantInsights[]
+  ingredientVendors    IngredientVendor[]
+  attendances          Attendance[]
+  dailyCashSessions    DailyCashSession[]
+  shopExpenses         ShopExpense[]
+  inventoryAdjustments InventoryAdjustment[]
+
   @@index([restaurantId])
 }
 
 model User {
-  id               Int          @id @default(autoincrement())
-  name             String
-  email            String       @unique
-  password         String
-  hasLogin         Boolean @default(false)
-  role             String
-  phone            String?      @unique
-  restaurantId     Int?
-  branchId         Int?
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
-  isActive         Boolean      @default(true) 
-  isDeleted        Boolean      @default(false)
-  restaurant       Restaurant?  @relation("RestaurantUsers", fields: [restaurantId], references: [id])
-  ownedRestaurants Restaurant[] @relation("RestaurantOwner")
-  branch           Branch?      @relation(fields: [branchId], references: [id])
-  salary      Float?
-  joiningDate DateTime?
-  shift       String?
-  employmentType String?
+  id                  Int          @id @default(autoincrement())
+  name                String
+  email               String       @unique
+  password            String
+  hasLogin            Boolean      @default(false)
+  role                String
+  phone               String?      @unique
+  restaurantId        Int?
+  branchId            Int?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  isActive            Boolean      @default(true)
+  isDeleted           Boolean      @default(false)
+  restaurant          Restaurant?  @relation("RestaurantUsers", fields: [restaurantId], references: [id])
+  ownedRestaurants    Restaurant[] @relation("RestaurantOwner")
+  branch              Branch?      @relation(fields: [branchId], references: [id])
+  salary              Float?
+  joiningDate         DateTime?
+  shift               String?
+  employmentType      String?
   monthlyWorkingHours Float?
-  department     String?
+  department          String?
+  attendances         Attendance[]
 }
 
 model Category {
-  id           Int      @id @default(autoincrement())
+  id           Int        @id @default(autoincrement())
   name         String
-  icon         String?  
+  icon         String?
   restaurantId Int
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
-  menuItems  MenuItem[]
-  isDeleted Boolean @default(false)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  menuItems    MenuItem[]
+  isDeleted    Boolean    @default(false)
+
   @@index([restaurantId])
 }
 
 model BillingSettings {
-  id              Int      @id @default(autoincrement())
-  branchId        Int      @unique   
-  billingTypes    String[]
-  gstPercentage   Float
-  serviceCharge   Float
-  includeGST      Boolean
-  enableDiscount  Boolean
-  enableTips      Boolean
-  paymentMethods  String[]
-  branch          Branch   @relation(fields: [branchId], references: [id])
+  id             Int      @id @default(autoincrement())
+  branchId       Int      @unique
+  billingTypes   String[]
+  gstPercentage  Float
+  serviceCharge  Float
+  includeGST     Boolean
+  enableDiscount Boolean
+  enableTips     Boolean
+  paymentMethods String[]
+  branch         Branch   @relation(fields: [branchId], references: [id])
 }
 
 model MenuItem {
-  id          Int     @id @default(autoincrement())
-  name        String
-  description String?
-  price       Float
-  prepTime    Int @default(0)
-  restaurantId Int
-  branchId     Int?
-  type         String?
-  categoryId   Int?
-  isAvailable Boolean @default(true)
-  isDeleted   Boolean @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
-  branch     Branch?    @relation(fields: [branchId], references: [id])
-  category   Category?  @relation(fields: [categoryId], references: [id])
+  id                  Int                  @id @default(autoincrement())
+  name                String
+  description         String?
+  price               Float
+  prepTime            Int                  @default(0)
+  restaurantId        Int
+  branchId            Int?
+  type                String?
+  categoryId          Int?
+  isAvailable         Boolean              @default(true)
+  isDeleted           Boolean              @default(false)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  restaurant          Restaurant           @relation(fields: [restaurantId], references: [id])
+  branch              Branch?              @relation(fields: [branchId], references: [id])
+  category            Category?            @relation(fields: [categoryId], references: [id])
   menuItemIngredients MenuItemIngredient[]
+
   @@index([restaurantId])
   @@index([branchId])
 }
 
 model Customer {
-  id           Int      @id @default(autoincrement())
+  id           Int        @id @default(autoincrement())
   name         String
-  phone        String   @unique
+  phone        String     @unique
   email        String?
   address      String?
   restaurantId Int
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
-  bills      Bill[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  bills        Bill[]
 }
 
 model Bill {
-  id            Int        @id @default(autoincrement())
-  billNo        String     @unique
+  id            Int    @id @default(autoincrement())
+  billNo        String @unique
   orderType     String
   paymentMethod String
-  cgst           Float? @default(0)
+  cgst          Float? @default(0)
 
-  sgst           Float? @default(0)
+  sgst Float? @default(0)
 
-  serviceCharge  Float? @default(0)
+  serviceCharge Float? @default(0)
 
-  packingCharge  Float? @default(0)
+  packingCharge Float?     @default(0)
   // PAYMENT STATUS
   status        BillStatus
 
   // ORDER STATUS
-  orderStatus   String     @default("COMPLETED")
-  subtotal      Float
-  gst           Float
-  discount      Float
-  total         Float
+  orderStatus String @default("COMPLETED")
+  subtotal    Float
+  gst         Float
+  discount    Float
+  total       Float
 
-  notes         String?
+  notes String?
 
-  restaurantId  Int
-  branchId      Int?
-  customerId    Int?
-  createdById   Int?
+  restaurantId Int
+  branchId     Int?
+  customerId   Int?
+  createdById  Int?
 
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  restaurant    Restaurant @relation(fields: [restaurantId], references: [id])
-  branch        Branch?    @relation(fields: [branchId], references: [id])
-  customer      Customer?  @relation(fields: [customerId], references: [id])
-  items         BillItem[]
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id])
+  customer   Customer?  @relation(fields: [customerId], references: [id])
+  items      BillItem[]
+
   @@index([restaurantId])
   @@index([restaurantId, branchId, createdAt])
   @@index([restaurantId, createdAt])
 }
-
-
 
 model BillItem {
   id         Int      @id @default(autoincrement())
@@ -223,68 +236,68 @@ model BillItem {
 }
 
 model RestaurantTable {
-  id                Int      @id @default(autoincrement())
-  name              String
-  capacity          Int?
-  status            String   @default("AVAILABLE")
+  id       Int    @id @default(autoincrement())
+  name     String
+  capacity Int?
+  status   String @default("AVAILABLE")
 
-  isTemporary       Boolean  @default(false)
-  tempTableType     String?
-  parentTableIds    String?
+  isTemporary    Boolean @default(false)
+  tempTableType  String?
+  parentTableIds String?
 
-  restaurantId      Int
-  branchId          Int
-  branch             Branch   @relation(fields: [branchId], references: [id])
-  runningOrders      RunningOrder[]
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  restaurantId  Int
+  branchId      Int
+  branch        Branch         @relation(fields: [branchId], references: [id])
+  runningOrders RunningOrder[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 }
 
 model RunningOrder {
-  id             Int      @id @default(autoincrement())
+  id            Int    @id @default(autoincrement())
   paymentStatus String @default("UNPAID")
-  restaurantId   Int
-  branchId       Int
-  tableId        Int?
+  restaurantId  Int
+  branchId      Int
+  tableId       Int?
 
   // ORDER INFO
-  orderType      String?
-  customerName   String?
-  customerPhone  String?
-  paymentMethod  String?
-  subtotal        Float? @default(0)
+  orderType     String?
+  customerName  String?
+  customerPhone String?
+  paymentMethod String?
+  subtotal      Float?  @default(0)
 
-  discountAmount  Float? @default(0)
+  discountAmount Float? @default(0)
 
-  packingCharge   Float? @default(0)
+  packingCharge Float? @default(0)
 
-  serviceCharge   Float? @default(0)
+  serviceCharge Float? @default(0)
 
-  gstAmount       Float? @default(0)
+  gstAmount Float? @default(0)
 
-  cgst            Float? @default(0)
+  cgst Float? @default(0)
 
-  sgst            Float? @default(0)
+  sgst Float? @default(0)
 
-  finalAmount     Float? @default(0)
+  finalAmount Float? @default(0)
   // ORDER FLOW STATUS
-  orderStatus    String   @default("ACTIVE")
+  orderStatus String @default("ACTIVE")
 
   // INTERNAL STATUS
-  status         String   @default("ACTIVE")
+  status String @default("ACTIVE")
 
-  startedAt      DateTime @default(now())
-  completedAt    DateTime?
-  createdById    Int?
-  totalAmount    Float    @default(0)
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  createdById Int?
+  totalAmount Float     @default(0)
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  restaurant     Restaurant       @relation(fields: [restaurantId], references: [id])
-  branch         Branch           @relation(fields: [branchId], references: [id])
-  table          RestaurantTable? @relation(fields: [tableId], references: [id])
-  batches        RunningOrderBatch[]
+  restaurant Restaurant          @relation(fields: [restaurantId], references: [id])
+  branch     Branch              @relation(fields: [branchId], references: [id])
+  table      RestaurantTable?    @relation(fields: [tableId], references: [id])
+  batches    RunningOrderBatch[]
 
   @@index([restaurantId])
   @@index([branchId])
@@ -293,39 +306,39 @@ model RunningOrder {
 }
 
 model RunningOrderBatch {
-  id               Int      @id @default(autoincrement())
-  runningOrderId   Int
-  createdAt        DateTime @default(now())
-  runningOrder RunningOrder @relation(fields: [runningOrderId], references: [id], onDelete: Cascade)
-  items RunningOrderBatchItem[]
+  id             Int                     @id @default(autoincrement())
+  runningOrderId Int
+  createdAt      DateTime                @default(now())
+  runningOrder   RunningOrder            @relation(fields: [runningOrderId], references: [id], onDelete: Cascade)
+  items          RunningOrderBatchItem[]
 }
 
 model RunningOrderBatchItem {
-  id                    Int      @id @default(autoincrement())
-  runningOrderBatchId   Int
-  menuItemId            Int?
-  itemName              String
-  quantity              Int
-  price                 Float
-  total                 Float
-  status                String @default("PENDING")
-  createdAt             DateTime @default(now())
-  runningOrderBatch RunningOrderBatch @relation(fields: [runningOrderBatchId], references: [id], onDelete: Cascade)
+  id                  Int               @id @default(autoincrement())
+  runningOrderBatchId Int
+  menuItemId          Int?
+  itemName            String
+  quantity            Int
+  price               Float
+  total               Float
+  status              String            @default("PENDING")
+  createdAt           DateTime          @default(now())
+  runningOrderBatch   RunningOrderBatch @relation(fields: [runningOrderBatchId], references: [id], onDelete: Cascade)
 }
 
 model Order {
-  id           Int    @id @default(autoincrement())
-  orderNo      String @unique
+  id           Int         @id @default(autoincrement())
+  orderNo      String      @unique
   restaurantId Int
-  branchId     Int 
-  tableId    Int?
-  customerId Int?
-  status    OrderStatus
-  orderType String
-  subtotal Float
-  gst      Float
-  discount Float
-  total    Float
+  branchId     Int
+  tableId      Int?
+  customerId   Int?
+  status       OrderStatus
+  orderType    String
+  subtotal     Float
+  gst          Float
+  discount     Float
+  total        Float
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -334,7 +347,7 @@ model Order {
   restaurant Restaurant @relation(fields: [restaurantId], references: [id])
 
   @@index([restaurantId])
-  @@index([branchId])  
+  @@index([branchId])
 }
 
 model OrderItem {
@@ -349,43 +362,43 @@ model OrderItem {
 }
 
 model IngredientCategory {
-  id            Int      @id @default(autoincrement())
-  name          String
-  restaurantId  Int
-  createdAt     DateTime @default(now())
-  restaurant    Restaurant @relation(fields: [restaurantId], references: [id])
-  ingredients   Ingredient[]
+  id           Int          @id @default(autoincrement())
+  name         String
+  restaurantId Int
+  createdAt    DateTime     @default(now())
+  restaurant   Restaurant   @relation(fields: [restaurantId], references: [id])
+  ingredients  Ingredient[]
 }
 
 model Ingredient {
-  id                Int      @id @default(autoincrement())
-  name              String
-  restaurantId      Int
-  categoryId        Int?
-  quantity          Float?
-  unit              String?
-  purchasePrice     Float?
-  pricePerUnit      Float?
-  isAiGenerated     Boolean @default(true)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  restaurant        Restaurant @relation(fields: [restaurantId], references: [id])
-  category          IngredientCategory? @relation(fields: [categoryId], references: [id])
-  menuItemIngredients MenuItemIngredient[]
-  ingredientVendors IngredientVendor[]
+  id                   Int                   @id @default(autoincrement())
+  name                 String
+  restaurantId         Int
+  categoryId           Int?
+  quantity             Float?
+  unit                 String?
+  purchasePrice        Float?
+  pricePerUnit         Float?
+  isAiGenerated        Boolean               @default(true)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  restaurant           Restaurant            @relation(fields: [restaurantId], references: [id])
+  category             IngredientCategory?   @relation(fields: [categoryId], references: [id])
+  menuItemIngredients  MenuItemIngredient[]
+  ingredientVendors    IngredientVendor[]
+  inventoryAdjustments InventoryAdjustment[]
 }
 
 model IngredientVendor {
-
-  id            Int      @id @default(autoincrement())
-  branchId      Int
-  ingredientId  Int
-  vendorId      Int
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  branch        Branch @relation(fields: [branchId], references: [id])
-  ingredient    Ingredient @relation(fields: [ingredientId], references: [id])
-  vendor        Vendor @relation(fields: [vendorId], references: [id])
+  id           Int        @id @default(autoincrement())
+  branchId     Int
+  ingredientId Int
+  vendorId     Int
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  branch       Branch     @relation(fields: [branchId], references: [id])
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+  vendor       Vendor     @relation(fields: [vendorId], references: [id])
 
   @@unique([branchId, ingredientId])
   @@index([branchId])
@@ -394,82 +407,90 @@ model IngredientVendor {
 }
 
 model RestaurantInsights {
-
-  id Int @id @default(autoincrement())
+  id           Int @id @default(autoincrement())
   restaurantId Int
-  branchId Int
+  branchId     Int
 
-  /* FIXED EXPENSES */
+  /**
+   * FIXED EXPENSES
+   */
 
   monthlyRent Float? @default(0)
-  loanEmi Float? @default(0)
-  internet Float? @default(0)
-  phoneBills Float? @default(0)
-  accounting Float? @default(0)
-  insurance Float? @default(0)
-  licenses Float? @default(0)
+  loanEmi     Float? @default(0)
+  internet    Float? @default(0)
+  phoneBills  Float? @default(0)
+  accounting  Float? @default(0)
+  insurance   Float? @default(0)
+  licenses    Float? @default(0)
 
-  /* VARIABLE EXPENSES */
+  /**
+   * VARIABLE EXPENSES
+   */
 
-  deliveryCharges Float? @default(0)
-  packaging Float? @default(0)
-  paymentGateway Float? @default(0)
+  deliveryCharges      Float? @default(0)
+  packaging            Float? @default(0)
+  paymentGateway       Float? @default(0)
   aggregatorCommission Float? @default(0)
-  electricity Float? @default(0)
-  gas Float? @default(0)
-  maintenance Float? @default(0)
-  fuel Float? @default(0)
+  electricity          Float? @default(0)
+  gas                  Float? @default(0)
+  maintenance          Float? @default(0)
+  fuel                 Float? @default(0)
 
-  /* FINANCIAL TARGETS */
+  /**
+   * FINANCIAL TARGETS
+   */
 
-  targetEbitda Float? @default(0)
-  targetFoodCost Float? @default(0)
-  targetGrossMargin Float? @default(0)
-  targetPrimeCost Float? @default(0)
+  targetEbitda       Float? @default(0)
+  targetFoodCost     Float? @default(0)
+  targetGrossMargin  Float? @default(0)
+  targetPrimeCost    Float? @default(0)
   monthlyRevenueGoal Float? @default(0)
-  monthlyProfitGoal Float? @default(0)
+  monthlyProfitGoal  Float? @default(0)
 
-  /* TAX & FINANCE */
+  /**
+   * TAX & FINANCE
+   */
 
-  gstPercentage Float? @default(0)
-  monthlyLoanEmi Float? @default(0)
+  gstPercentage           Float? @default(0)
+  monthlyLoanEmi          Float? @default(0)
   monthlyInterestPayments Float? @default(0)
-  caFees Float? @default(0)
-  insuranceCost Float? @default(0)
-  otherTaxes Float? @default(0)
+  caFees                  Float? @default(0)
+  insuranceCost           Float? @default(0)
+  otherTaxes              Float? @default(0)
 
-  /* BUSINESS ASSUMPTIONS */
+  /**
+   * BUSINESS ASSUMPTIONS
+   */
 
-  expectedMonthlyGrowth Float? @default(0)
-  expectedDeliveryGrowth Float? @default(0)
-  expectedInflation Float? @default(0)
-  seasonalImpact Float? @default(0)
-  weekendSalesIncrease Float? @default(0)
-  plannedExpansion String?
+  expectedMonthlyGrowth  Float?  @default(0)
+  expectedDeliveryGrowth Float?  @default(0)
+  expectedInflation      Float?  @default(0)
+  seasonalImpact         Float?  @default(0)
+  weekendSalesIncrease   Float?  @default(0)
+  plannedExpansion       String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   restaurant Restaurant @relation(fields: [restaurantId], references: [id])
-  branch Branch @relation(fields: [branchId], references: [id])
-    
+  branch     Branch     @relation(fields: [branchId], references: [id])
+
   @@unique([restaurantId, branchId])
 }
 
 model InventoryRestock {
+  id           Int  @id @default(autoincrement())
+  restaurantId Int
+  branchId     Int
+  month        Int
+  year         Int
+  data         Json
 
-  id            Int       @id @default(autoincrement())
-  restaurantId  Int
-  branchId      Int
-  month         Int
-  year          Int
-  data          Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  restaurant    Restaurant   @relation(fields: [restaurantId], references: [id])
-  branch        Branch   @relation(fields: [branchId], references: [id])
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch     @relation(fields: [branchId], references: [id])
 
   @@unique([restaurantId, branchId, month, year])
   @@index([restaurantId])
@@ -477,63 +498,63 @@ model InventoryRestock {
 }
 
 model MenuItemIngredient {
-  id            Int @id @default(autoincrement())
-  menuItemId    Int
-  ingredientId  Int
-  quantity      Float
-  unit          String
-  wastage       Float?
+  id           Int    @id @default(autoincrement())
+  menuItemId   Int
+  ingredientId Int
+  quantity     Float
+  unit         String
+  wastage      Float?
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  menuItem       MenuItem @relation(fields: [menuItemId], references: [id])
-  ingredient     Ingredient @relation(fields: [ingredientId], references: [id])
+  menuItem   MenuItem   @relation(fields: [menuItemId], references: [id])
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id])
 }
 
 model Vendor {
-  id            Int      @id @default(autoincrement())
+  id                Int                @id @default(autoincrement())
   ingredientVendors IngredientVendor[]
-  name          String
-  address       String?
-  phone         String?
-  restaurantId  Int
-  branchId      Int?
+  name              String
+  address           String?
+  phone             String?
+  restaurantId      Int
+  branchId          Int?
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  restaurant    Restaurant @relation(fields: [restaurantId],references: [id])
-  branch        Branch? @relation(fields: [branchId],references: [id])
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id])
 
   @@index([restaurantId])
   @@index([branchId])
 }
 
 model Attendance {
-  id            Int       @id @default(autoincrement())
+  id Int @id @default(autoincrement())
 
-  userId        Int
-  restaurantId  Int
-  branchId      Int
+  userId       Int
+  restaurantId Int
+  branchId     Int
 
-  date          DateTime
+  date DateTime
 
-  loginTime     DateTime?
-  logoutTime    DateTime?
+  loginTime  DateTime?
+  logoutTime DateTime?
 
-  totalHours    Float? @default(0)
+  totalHours Float? @default(0)
 
-  status        String? // PRESENT, ABSENT, HALF_DAY
+  status String? // PRESENT, ABSENT, HALF_DAY
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  user          User @relation(fields: [userId], references: [id])
-  restaurant    Restaurant @relation(fields: [restaurantId], references: [id])
-  branch        Branch @relation(fields: [branchId], references: [id])
+  user       User       @relation(fields: [userId], references: [id])
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch     @relation(fields: [branchId], references: [id])
 
-  breaks        AttendanceBreak[]
+  breaks AttendanceBreak[]
 
   @@index([userId])
   @@index([branchId])
@@ -541,122 +562,119 @@ model Attendance {
 }
 
 model AttendanceBreak {
-  id             Int       @id @default(autoincrement())
+  id Int @id @default(autoincrement())
 
-  attendanceId   Int
+  attendanceId Int
 
-  startTime      DateTime
-  endTime        DateTime?
+  startTime DateTime
+  endTime   DateTime?
 
-  totalMinutes   Int? @default(0)
+  totalMinutes Int? @default(0)
 
-  reason         String?
+  reason String?
 
-  createdAt      DateTime @default(now())
+  createdAt DateTime @default(now())
 
-  attendance     Attendance @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+  attendance Attendance @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
 
   @@index([attendanceId])
 }
 
 model DailyCashSession {
+  id Int @id @default(autoincrement())
 
-  id               Int      @id @default(autoincrement())
+  restaurantId Int
+  branchId     Int
 
-  restaurantId     Int
-  branchId         Int
+  openedById Int
+  closedById Int?
 
-  openedById       Int
-  closedById       Int?
+  businessDate DateTime
 
-  businessDate     DateTime
+  openingCash Float @default(0)
 
-  openingCash      Float @default(0)
+  expectedCash Float @default(0)
 
-  expectedCash     Float @default(0)
+  actualCash Float @default(0)
 
-  actualCash       Float @default(0)
+  closingCash Float @default(0)
 
-  closingCash      Float @default(0)
+  cashDifference Float @default(0)
 
-  cashDifference   Float @default(0)
+  notes String?
 
-  notes            String?
+  openedAt DateTime  @default(now())
+  closedAt DateTime?
 
-  openedAt         DateTime @default(now())
-  closedAt         DateTime?
+  status String @default("OPEN")
 
-  status           String @default("OPEN")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  restaurant       Restaurant @relation(fields: [restaurantId], references: [id])
-  branch           Branch @relation(fields: [branchId], references: [id])
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch     @relation(fields: [branchId], references: [id])
 
   @@index([restaurantId])
   @@index([branchId])
 }
 
 model ShopExpense {
+  id Int @id @default(autoincrement())
 
-  id              Int      @id @default(autoincrement())
+  restaurantId Int
+  branchId     Int
 
-  restaurantId    Int
-  branchId        Int
+  title       String
+  description String?
 
-  title           String
-  description     String?
+  amount Float
 
-  amount          Float
+  expenseType String? // ELECTRICITY, STAFF, PETROL
 
-  expenseType     String? // ELECTRICITY, STAFF, PETROL
+  paymentSource String // SHOP_CASH, EMPLOYEE_PAID
 
-  paymentSource   String // SHOP_CASH, EMPLOYEE_PAID
+  paidByUserId Int?
 
-  paidByUserId    Int?
+  expenseDate DateTime
 
-  expenseDate     DateTime
+  createdById Int?
 
-  createdById     Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  restaurant      Restaurant @relation(fields: [restaurantId], references: [id])
-  branch          Branch @relation(fields: [branchId], references: [id])
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch     @relation(fields: [branchId], references: [id])
 
   @@index([restaurantId])
   @@index([branchId])
 }
 
 model InventoryAdjustment {
+  id Int @id @default(autoincrement())
 
-  id              Int      @id @default(autoincrement())
+  restaurantId Int
+  branchId     Int
 
-  restaurantId    Int
-  branchId        Int
+  ingredientId Int
 
-  ingredientId    Int
+  quantity Float
 
-  quantity        Float
-
-  adjustmentType  String
+  adjustmentType String
   // DAMAGE
   // WASTAGE
   // EXPIRED
   // MANUAL
 
-  reason          String?
+  reason String?
 
-  updatedById     Int?
+  updatedById Int?
 
-  createdAt       DateTime @default(now())
+  createdAt DateTime @default(now())
 
-  restaurant      Restaurant @relation(fields: [restaurantId], references: [id])
-  branch          Branch @relation(fields: [branchId], references: [id])
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch     @relation(fields: [branchId], references: [id])
 
-  ingredient      Ingredient @relation(fields: [ingredientId], references: [id])
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id])
 
   @@index([restaurantId])
   @@index([branchId])
