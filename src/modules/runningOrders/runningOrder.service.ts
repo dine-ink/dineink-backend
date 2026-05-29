@@ -117,6 +117,44 @@ export const getRunningOrderByTableService = async (tableId: number) => {
   });
 };
 
+export const getAllRunningOrdersService = async (
+  restaurantId: number,
+  branchId: number,
+) => {
+  const orders = await prisma.runningOrder.findMany({
+    where: {
+      restaurantId,
+      branchId,
+      status: "ACTIVE",
+      kitchenStatus: { in: ["PENDING", "PREPARING"] },
+    },
+    include: {
+      batches: {
+        include: { items: true },
+        orderBy: { createdAt: "asc" },
+      },
+      table: { select: { id: true, name: true } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  return orders.map((order) => ({
+    ...order,
+    status: order.kitchenStatus,
+    tableName: order.table?.name ?? null,
+  }));
+};
+
+export const updateRunningOrderStatusService = async (
+  orderId: number,
+  status: string,
+) => {
+  return prisma.runningOrder.update({
+    where: { id: orderId },
+    data: { kitchenStatus: status },
+  });
+};
+
 export const closeRunningOrderService = async (data: any) => {
   const {
     runningOrderId,

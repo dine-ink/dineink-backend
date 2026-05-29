@@ -3,6 +3,8 @@ import {
   saveRunningOrderService,
   getRunningOrderByTableService,
   closeRunningOrderService,
+  getAllRunningOrdersService,
+  updateRunningOrderStatusService,
 } from "./runningOrder.service";
 
 export const saveRunningOrder = async (req: Request, res: Response) => {
@@ -45,5 +47,27 @@ export const closeRunningOrder = async (req: Request, res: Response) => {
       success: false,
       message: error.message,
     });
+  }
+};
+
+export const getAllRunningOrders = async (req: Request, res: Response) => {
+  try {
+    const restaurantId = Number(req.params.restaurantId);
+    const branchId = Number(req.params.branchId);
+    const response = await getAllRunningOrdersService(restaurantId, branchId);
+    return res.status(200).json({ success: true, data: response });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const updateRunningOrderStatus = async (req: Request, res: Response) => {
+  try {
+    const orderId = Number(req.params.orderId);
+    const { status } = req.body;
+    const response = await updateRunningOrderStatusService(orderId, status);
+    return res.status(200).json({ success: true, data: response });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
   }
 };

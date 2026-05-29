@@ -288,6 +288,9 @@ model RunningOrder {
   // INTERNAL STATUS
   status String @default("ACTIVE")
 
+  // KITCHEN STATUS
+  kitchenStatus String @default("PENDING")
+
   startedAt   DateTime  @default(now())
   completedAt DateTime?
   createdById Int?
