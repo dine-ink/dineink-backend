@@ -509,3 +509,155 @@ model Vendor {
   @@index([restaurantId])
   @@index([branchId])
 }
+
+model Attendance {
+  id            Int       @id @default(autoincrement())
+
+  userId        Int
+  restaurantId  Int
+  branchId      Int
+
+  date          DateTime
+
+  loginTime     DateTime?
+  logoutTime    DateTime?
+
+  totalHours    Float? @default(0)
+
+  status        String? // PRESENT, ABSENT, HALF_DAY
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User @relation(fields: [userId], references: [id])
+  restaurant    Restaurant @relation(fields: [restaurantId], references: [id])
+  branch        Branch @relation(fields: [branchId], references: [id])
+
+  breaks        AttendanceBreak[]
+
+  @@index([userId])
+  @@index([branchId])
+  @@index([date])
+}
+
+model AttendanceBreak {
+  id             Int       @id @default(autoincrement())
+
+  attendanceId   Int
+
+  startTime      DateTime
+  endTime        DateTime?
+
+  totalMinutes   Int? @default(0)
+
+  reason         String?
+
+  createdAt      DateTime @default(now())
+
+  attendance     Attendance @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+
+  @@index([attendanceId])
+}
+
+model DailyCashSession {
+
+  id               Int      @id @default(autoincrement())
+
+  restaurantId     Int
+  branchId         Int
+
+  openedById       Int
+  closedById       Int?
+
+  businessDate     DateTime
+
+  openingCash      Float @default(0)
+
+  expectedCash     Float @default(0)
+
+  actualCash       Float @default(0)
+
+  closingCash      Float @default(0)
+
+  cashDifference   Float @default(0)
+
+  notes            String?
+
+  openedAt         DateTime @default(now())
+  closedAt         DateTime?
+
+  status           String @default("OPEN")
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  restaurant       Restaurant @relation(fields: [restaurantId], references: [id])
+  branch           Branch @relation(fields: [branchId], references: [id])
+
+  @@index([restaurantId])
+  @@index([branchId])
+}
+
+model ShopExpense {
+
+  id              Int      @id @default(autoincrement())
+
+  restaurantId    Int
+  branchId        Int
+
+  title           String
+  description     String?
+
+  amount          Float
+
+  expenseType     String? // ELECTRICITY, STAFF, PETROL
+
+  paymentSource   String // SHOP_CASH, EMPLOYEE_PAID
+
+  paidByUserId    Int?
+
+  expenseDate     DateTime
+
+  createdById     Int?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  restaurant      Restaurant @relation(fields: [restaurantId], references: [id])
+  branch          Branch @relation(fields: [branchId], references: [id])
+
+  @@index([restaurantId])
+  @@index([branchId])
+}
+
+model InventoryAdjustment {
+
+  id              Int      @id @default(autoincrement())
+
+  restaurantId    Int
+  branchId        Int
+
+  ingredientId    Int
+
+  quantity        Float
+
+  adjustmentType  String
+  // DAMAGE
+  // WASTAGE
+  // EXPIRED
+  // MANUAL
+
+  reason          String?
+
+  updatedById     Int?
+
+  createdAt       DateTime @default(now())
+
+  restaurant      Restaurant @relation(fields: [restaurantId], references: [id])
+  branch          Branch @relation(fields: [branchId], references: [id])
+
+  ingredient      Ingredient @relation(fields: [ingredientId], references: [id])
+
+  @@index([restaurantId])
+  @@index([branchId])
+}
