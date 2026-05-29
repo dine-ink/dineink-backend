@@ -5,6 +5,11 @@ import {
   logoutAttendance,
   startBreak,
   endBreak,
+  createExpense,
+  deleteExpense,
+  getExpenses,
+  getExpenseUsers,
+  updateExpense,
 } from "./admin.controller";
 
 const router = Router();
@@ -18,5 +23,13 @@ router.post("/attendance/logout", logoutAttendance);
 router.post("/attendance/start-break", startBreak);
 
 router.post("/attendance/end-break", endBreak);
+router.get("/expenses/:branchId", getExpenses);
 
+router.get("/expenses/users/:branchId", getExpenseUsers);
+
+router.post("/expenses", createExpense);
+
+router.put("/expenses/:id", updateExpense);
+
+router.delete("/expenses/:id", deleteExpense);
 export default router;

@@ -92,22 +92,22 @@ model Branch {
 }
 
 model User {
-  id                  Int          @id @default(autoincrement())
+  id                  Int           @id @default(autoincrement())
   name                String
-  email               String       @unique
+  email               String        @unique
   password            String
-  hasLogin            Boolean      @default(false)
+  hasLogin            Boolean       @default(false)
   role                String
-  phone               String?      @unique
+  phone               String?       @unique
   restaurantId        Int?
   branchId            Int?
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
-  isActive            Boolean      @default(true)
-  isDeleted           Boolean      @default(false)
-  restaurant          Restaurant?  @relation("RestaurantUsers", fields: [restaurantId], references: [id])
-  ownedRestaurants    Restaurant[] @relation("RestaurantOwner")
-  branch              Branch?      @relation(fields: [branchId], references: [id])
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  isActive            Boolean       @default(true)
+  isDeleted           Boolean       @default(false)
+  restaurant          Restaurant?   @relation("RestaurantUsers", fields: [restaurantId], references: [id])
+  ownedRestaurants    Restaurant[]  @relation("RestaurantOwner")
+  branch              Branch?       @relation(fields: [branchId], references: [id])
   salary              Float?
   joiningDate         DateTime?
   shift               String?
@@ -115,6 +115,7 @@ model User {
   monthlyWorkingHours Float?
   department          String?
   attendances         Attendance[]
+  paidExpenses        ShopExpense[] @relation("ExpensePaidByUser")
 }
 
 model Category {
@@ -629,9 +630,9 @@ model ShopExpense {
 
   amount Float
 
-  expenseType String? // ELECTRICITY, STAFF, PETROL
+  expenseType String?
 
-  paymentSource String // SHOP_CASH, EMPLOYEE_PAID
+  paymentSource String
 
   paidByUserId Int?
 
@@ -645,8 +646,11 @@ model ShopExpense {
   restaurant Restaurant @relation(fields: [restaurantId], references: [id])
   branch     Branch     @relation(fields: [branchId], references: [id])
 
+  paidByUser User? @relation("ExpensePaidByUser", fields: [paidByUserId], references: [id])
+
   @@index([restaurantId])
   @@index([branchId])
+  @@index([paidByUserId])
 }
 
 model InventoryAdjustment {

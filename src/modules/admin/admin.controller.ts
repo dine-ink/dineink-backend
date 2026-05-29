@@ -6,6 +6,11 @@ import {
   logoutAttendanceService,
   startBreakService,
   endBreakService,
+  createExpenseService,
+  deleteExpenseService,
+  getExpensesService,
+  getExpenseUsersService,
+  updateExpenseService,
 } from "./admin.service";
 
 export const getTodayAttendance = async (req: Request, res: Response) => {
@@ -95,6 +100,104 @@ export const endBreak = async (req: Request, res: Response) => {
     return res.status(200).json({
       success: true,
       data,
+    });
+  } catch (error: any) {
+    console.log(error);
+
+    return res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+export const getExpenses = async (req: Request, res: Response) => {
+  try {
+    const branchId = Number(req.params.branchId);
+
+    const data = await getExpensesService(branchId);
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error: any) {
+    console.log(error);
+
+    return res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+export const getExpenseUsers = async (req: Request, res: Response) => {
+  try {
+    const branchId = Number(req.params.branchId);
+
+    const data = await getExpenseUsersService(branchId);
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error: any) {
+    console.log(error);
+
+    return res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+export const createExpense = async (req: Request, res: Response) => {
+  try {
+    const data = await createExpenseService(req.body);
+
+    return res.status(201).json({
+      success: true,
+      data,
+    });
+  } catch (error: any) {
+    console.log(error);
+
+    return res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+export const updateExpense = async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+
+    const data = await updateExpenseService(id, req.body);
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error: any) {
+    console.log(error);
+
+    return res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+export const deleteExpense = async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+
+    await deleteExpenseService(id);
+
+    return res.status(200).json({
+      success: true,
+      message: "Expense deleted successfully",
     });
   } catch (error: any) {
     console.log(error);

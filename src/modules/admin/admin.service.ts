@@ -217,3 +217,106 @@ export const endBreakService = async (attendanceId: number) => {
     },
   });
 };
+
+export const getExpensesService = async (branchId: number) => {
+  return prisma.shopExpense.findMany({
+    where: {
+      branchId,
+    },
+
+    include: {
+      paidByUser: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
+
+    orderBy: {
+      expenseDate: "desc",
+    },
+  });
+};
+
+export const getExpenseUsersService = async (branchId: number) => {
+  return prisma.user.findMany({
+    where: {
+      branchId,
+      isDeleted: false,
+    },
+
+    select: {
+      id: true,
+      name: true,
+    },
+
+    orderBy: {
+      name: "asc",
+    },
+  });
+};
+
+export const createExpenseService = async (data: any) => {
+  return prisma.shopExpense.create({
+    data: {
+      restaurantId: data.restaurantId,
+
+      branchId: data.branchId,
+
+      title: data.title,
+
+      description: data.description,
+
+      amount: Number(data.amount),
+
+      expenseType: data.expenseType,
+
+      paymentSource: data.paymentSource,
+
+      paidByUserId:
+        data.paymentSource === "EMPLOYEE_PAID"
+          ? Number(data.paidByUserId)
+          : null,
+
+      expenseDate: new Date(data.expenseDate),
+
+      createdById: data.createdById,
+    },
+  });
+};
+
+export const updateExpenseService = async (id: number, data: any) => {
+  return prisma.shopExpense.update({
+    where: {
+      id,
+    },
+
+    data: {
+      title: data.title,
+
+      description: data.description,
+
+      amount: Number(data.amount),
+
+      expenseType: data.expenseType,
+
+      paymentSource: data.paymentSource,
+
+      paidByUserId:
+        data.paymentSource === "EMPLOYEE_PAID"
+          ? Number(data.paidByUserId)
+          : null,
+
+      expenseDate: new Date(data.expenseDate),
+    },
+  });
+};
+
+export const deleteExpenseService = async (id: number) => {
+  return prisma.shopExpense.delete({
+    where: {
+      id,
+    },
+  });
+};
