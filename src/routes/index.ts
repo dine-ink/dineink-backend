@@ -8,6 +8,7 @@ import inventoryRoutes from "../modules/inventory/inventory.routes";
 import restaurantRoutes from "../modules/restaurant/restaurant.routes";
 import runningOrderRoutes from "../modules/runningOrders/runningOrder.routes";
 import settingsRoutes from "../modules/settings/settings.routes";
+import adminRoutes from "../modules/admin/admin.routes";
 
 const router = express.Router();
 
@@ -20,5 +21,6 @@ router.use("/inventory", inventoryRoutes);
 router.use("/restaurant", restaurantRoutes);
 router.use("/running-orders", runningOrderRoutes);
 router.use("/settings", settingsRoutes);
+router.use("/admin", adminRoutes);
 
 export default router;

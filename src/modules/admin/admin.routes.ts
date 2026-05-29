@@ -18,3 +18,5 @@ router.post("/attendance/logout", logoutAttendance);
 router.post("/attendance/start-break", startBreak);
 
 router.post("/attendance/end-break", endBreak);
+
+export default router;
