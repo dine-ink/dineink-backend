@@ -11,6 +11,12 @@ import {
   getExpensesService,
   getExpenseUsersService,
   updateExpenseService,
+  getInventoryAdjustmentsService,
+  getInventoryIngredientsService,
+  getInventoryUsersService,
+  createInventoryAdjustmentService,
+  updateInventoryAdjustmentService,
+  deleteInventoryAdjustmentService,
 } from "./admin.service";
 
 export const getTodayAttendance = async (req: Request, res: Response) => {
@@ -202,6 +208,115 @@ export const deleteExpense = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.log(error);
 
+    return res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+export const getInventoryAdjustments = async (req: Request, res: Response) => {
+  try {
+    const branchId = Number(req.params.branchId);
+
+    const data = await getInventoryAdjustmentsService(branchId);
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+export const getInventoryIngredients = async (req: Request, res: Response) => {
+  try {
+    const restaurantId = Number(req.params.restaurantId);
+
+    const data = await getInventoryIngredientsService(restaurantId);
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+export const getInventoryUsers = async (req: Request, res: Response) => {
+  try {
+    const branchId = Number(req.params.branchId);
+
+    const data = await getInventoryUsersService(branchId);
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+export const createInventoryAdjustment = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const data = await createInventoryAdjustmentService(req.body);
+
+    return res.status(201).json({
+      success: true,
+      data,
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+export const updateInventoryAdjustment = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const id = Number(req.params.id);
+
+    const data = await updateInventoryAdjustmentService(id, req.body);
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+export const deleteInventoryAdjustment = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const id = Number(req.params.id);
+
+    await deleteInventoryAdjustmentService(id);
+
+    return res.status(200).json({
+      success: true,
+      message: "Inventory adjustment deleted",
+    });
+  } catch (error: any) {
     return res.status(400).json({
       success: false,
       message: error.message,

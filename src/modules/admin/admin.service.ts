@@ -320,3 +320,113 @@ export const deleteExpenseService = async (id: number) => {
     },
   });
 };
+
+export const getInventoryAdjustmentsService = async (branchId: number) => {
+  return prisma.inventoryAdjustment.findMany({
+    where: {
+      branchId,
+    },
+
+    include: {
+      ingredient: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+
+      updatedBy: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
+
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+};
+export const getInventoryIngredientsService = async (restaurantId: number) => {
+  return prisma.ingredient.findMany({
+    where: {
+      restaurantId,
+    },
+
+    select: {
+      id: true,
+      name: true,
+      unit: true,
+    },
+
+    orderBy: {
+      name: "asc",
+    },
+  });
+};
+export const getInventoryUsersService = async (branchId: number) => {
+  return prisma.user.findMany({
+    where: {
+      branchId,
+      isDeleted: false,
+    },
+
+    select: {
+      id: true,
+      name: true,
+    },
+
+    orderBy: {
+      name: "asc",
+    },
+  });
+};
+export const createInventoryAdjustmentService = async (data: any) => {
+  return prisma.inventoryAdjustment.create({
+    data: {
+      restaurantId: data.restaurantId,
+
+      branchId: data.branchId,
+
+      ingredientId: Number(data.ingredientId),
+
+      quantity: Number(data.quantity),
+
+      adjustmentType: data.adjustmentType,
+
+      reason: data.reason,
+
+      updatedById: data.updatedById,
+    },
+  });
+};
+export const updateInventoryAdjustmentService = async (
+  id: number,
+  data: any,
+) => {
+  return prisma.inventoryAdjustment.update({
+    where: {
+      id,
+    },
+
+    data: {
+      ingredientId: Number(data.ingredientId),
+
+      quantity: Number(data.quantity),
+
+      adjustmentType: data.adjustmentType,
+
+      reason: data.reason,
+
+      updatedById: data.updatedById,
+    },
+  });
+};
+export const deleteInventoryAdjustmentService = async (id: number) => {
+  return prisma.inventoryAdjustment.delete({
+    where: {
+      id,
+    },
+  });
+};

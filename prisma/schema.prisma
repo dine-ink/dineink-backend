@@ -92,30 +92,31 @@ model Branch {
 }
 
 model User {
-  id                  Int           @id @default(autoincrement())
-  name                String
-  email               String        @unique
-  password            String
-  hasLogin            Boolean       @default(false)
-  role                String
-  phone               String?       @unique
-  restaurantId        Int?
-  branchId            Int?
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
-  isActive            Boolean       @default(true)
-  isDeleted           Boolean       @default(false)
-  restaurant          Restaurant?   @relation("RestaurantUsers", fields: [restaurantId], references: [id])
-  ownedRestaurants    Restaurant[]  @relation("RestaurantOwner")
-  branch              Branch?       @relation(fields: [branchId], references: [id])
-  salary              Float?
-  joiningDate         DateTime?
-  shift               String?
-  employmentType      String?
-  monthlyWorkingHours Float?
-  department          String?
-  attendances         Attendance[]
-  paidExpenses        ShopExpense[] @relation("ExpensePaidByUser")
+  id                          Int                   @id @default(autoincrement())
+  name                        String
+  email                       String                @unique
+  password                    String
+  hasLogin                    Boolean               @default(false)
+  role                        String
+  phone                       String?               @unique
+  restaurantId                Int?
+  branchId                    Int?
+  createdAt                   DateTime              @default(now())
+  updatedAt                   DateTime              @updatedAt
+  isActive                    Boolean               @default(true)
+  isDeleted                   Boolean               @default(false)
+  restaurant                  Restaurant?           @relation("RestaurantUsers", fields: [restaurantId], references: [id])
+  ownedRestaurants            Restaurant[]          @relation("RestaurantOwner")
+  branch                      Branch?               @relation(fields: [branchId], references: [id])
+  salary                      Float?
+  joiningDate                 DateTime?
+  shift                       String?
+  employmentType              String?
+  monthlyWorkingHours         Float?
+  department                  String?
+  attendances                 Attendance[]
+  paidExpenses                ShopExpense[]         @relation("ExpensePaidByUser")
+  inventoryAdjustmentsUpdated InventoryAdjustment[] @relation("InventoryUpdatedBy")
 }
 
 model Category {
@@ -679,6 +680,7 @@ model InventoryAdjustment {
   branch     Branch     @relation(fields: [branchId], references: [id])
 
   ingredient Ingredient @relation(fields: [ingredientId], references: [id])
+  updatedBy  User?      @relation("InventoryUpdatedBy", fields: [updatedById], references: [id])
 
   @@index([restaurantId])
   @@index([branchId])
