@@ -6,6 +6,7 @@ import {
   getMenuItemMappingData,
   saveRestockHistoryData,
   getRestockHistoryData,
+  getInventoryAdjustmentsService,
 } from "./inventory.service";
 
 export const getMenuManagement = async (req: any, res: any) => {
@@ -95,20 +96,29 @@ export const saveRestockHistory = async (req: Request, res: Response) => {
 export const getRestockHistory = async (req: Request, res: Response) => {
   try {
     const restaurantId = Number(req.params.restaurantId);
-
     const branchId = Number(req.query.branchId);
-
     const result = await getRestockHistoryData(restaurantId, branchId);
-
-    return res.json({
-      success: true,
-      data: result,
-    });
+    return res.json({ success: true, data: result });
   } catch (err) {
     console.log(err);
+    return res.status(500).json({ success: false });
+  }
+};
 
-    return res.status(500).json({
-      success: false,
-    });
+// GET /api/inventory/adjustments?branchId=&from=&to=
+export const getAdjustments = async (req: Request, res: Response) => {
+  try {
+    const branchId = Number(req.query.branchId);
+    const from = req.query.from as string | undefined;
+    const to = req.query.to as string | undefined;
+
+    if (!branchId) {
+      return res.status(400).json({ success: false, message: "branchId is required" });
+    }
+
+    const data = await getInventoryAdjustmentsService(branchId, from, to);
+    return res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
   }
 };

@@ -151,3 +151,61 @@ export const getBillsService = async (
 export const getBranchWiseBillsService = async (restaurantId: number, branchId: number) => {
   return getBillsService(restaurantId, branchId);
 };
+
+// ─── getReportBillsService ───────────────────────────────────────────────────
+// Raw bills with all financial fields — used by the Reports/P&L page
+
+export const getReportBillsService = async (
+  restaurantId: number,
+  branchId?: number,
+  from?: string,
+  to?: string,
+) => {
+  const dateFilter =
+    from && to
+      ? {
+          createdAt: {
+            gte: new Date(from),
+            lte: new Date(to + "T23:59:59.999Z"),
+          },
+        }
+      : {};
+
+  return prisma.bill.findMany({
+    where: {
+      restaurantId,
+      ...(branchId ? { branchId } : {}),
+      ...dateFilter,
+    },
+    select: {
+      id: true,
+      billNo: true,
+      orderType: true,
+      paymentMethod: true,
+      status: true,
+      orderStatus: true,
+      subtotal: true,
+      cgst: true,
+      sgst: true,
+      gst: true,
+      discount: true,
+      serviceCharge: true,
+      packingCharge: true,
+      total: true,
+      notes: true,
+      createdAt: true,
+      customer: { select: { id: true, name: true, phone: true } },
+      items: {
+        select: {
+          id: true,
+          menuItemId: true,
+          itemName: true,
+          quantity: true,
+          price: true,
+          total: true,
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+};

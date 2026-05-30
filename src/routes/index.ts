@@ -9,6 +9,10 @@ import restaurantRoutes from "../modules/restaurant/restaurant.routes";
 import runningOrderRoutes from "../modules/runningOrders/runningOrder.routes";
 import settingsRoutes from "../modules/settings/settings.routes";
 import adminRoutes from "../modules/admin/admin.routes";
+import reportsRoutes from "../modules/reports/reports.routes";
+import cashRoutes from "../modules/cash/cash.routes";
+import attendanceRoutes from "../modules/attendance/attendance.routes";
+import ordersRoutes from "../modules/orders/orders.routes";
 
 const router = express.Router();
 
@@ -22,5 +26,9 @@ router.use("/restaurant", restaurantRoutes);
 router.use("/running-orders", runningOrderRoutes);
 router.use("/settings", settingsRoutes);
 router.use("/admin", adminRoutes);
+router.use("/reports", reportsRoutes);
+router.use("/cash", cashRoutes);
+router.use("/attendance", attendanceRoutes);
+router.use("/orders", ordersRoutes);
 
 export default router;

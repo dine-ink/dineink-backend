@@ -3,6 +3,7 @@ import {
   createBillService,
   getBillsService,
   getBranchWiseBillsService,
+  getReportBillsService,
 } from "./bill.service";
 
 export const createBill = async (req: Request, res: Response) => {
@@ -25,21 +26,25 @@ export const createBill = async (req: Request, res: Response) => {
 export const getBills = async (req: Request, res: Response) => {
   try {
     const restaurantId = Number(req.params.id);
-
-    const branchId = req.query.branchId
-      ? Number(req.query.branchId)
-      : undefined;
-
+    const branchId = req.query.branchId ? Number(req.query.branchId) : undefined;
     const bills = await getBillsService(restaurantId, branchId);
-    return res.status(200).json({
-      success: true,
-      bills,
-    });
+    return res.status(200).json({ success: true, bills });
   } catch (error: any) {
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+// Raw bills with all financial fields for Reports/P&L page
+export const getReportBills = async (req: Request, res: Response) => {
+  try {
+    const restaurantId = Number(req.params.restaurantId);
+    const branchId = req.query.branchId ? Number(req.query.branchId) : undefined;
+    const from = req.query.from as string | undefined;
+    const to = req.query.to as string | undefined;
+    const bills = await getReportBillsService(restaurantId, branchId, from, to);
+    return res.status(200).json({ success: true, bills });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
   }
 };
 

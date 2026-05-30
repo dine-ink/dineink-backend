@@ -192,14 +192,39 @@ export const getRestockHistoryData = async (
   return prisma.inventoryRestock.findMany({
     where: {
       restaurantId,
-
-      ...(branchId && {
-        branchId,
-      }),
+      ...(branchId && { branchId }),
     },
+    orderBy: { createdAt: "desc" },
+  });
+};
 
-    orderBy: {
-      createdAt: "desc",
+// ─── getInventoryAdjustmentsService ──────────────────────────────────────────
+
+export const getInventoryAdjustmentsService = async (
+  branchId: number,
+  from?: string,
+  to?: string,
+) => {
+  const dateFilter =
+    from && to
+      ? {
+          createdAt: {
+            gte: new Date(from),
+            lte: new Date(to + "T23:59:59.999Z"),
+          },
+        }
+      : {};
+
+  return prisma.inventoryAdjustment.findMany({
+    where: { branchId, ...dateFilter },
+    include: {
+      ingredient: {
+        select: { id: true, name: true, unit: true, pricePerUnit: true },
+      },
+      updatedBy: {
+        select: { id: true, name: true, role: true },
+      },
     },
+    orderBy: { createdAt: "desc" },
   });
 };

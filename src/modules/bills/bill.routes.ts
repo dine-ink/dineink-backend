@@ -1,9 +1,12 @@
 import { Router } from "express";
-import { createBill, getBills, getBranchWiseBills } from "./bill.controller";
+import { createBill, getBranchWiseBills, getReportBills } from "./bill.controller";
+import { authMiddleware } from "../../middleware/auth";
 
 const router = Router();
+
 router.post("/create", createBill);
 router.get("/:restaurantId/:branchId/branchwise", getBranchWiseBills);
-router.get("/:id/restaurantwise", getBills);
+// Raw bills with all financial fields — supports ?branchId= ?from= ?to=
+router.get("/:restaurantId/restaurantwise", authMiddleware, getReportBills);
 
 export default router;
