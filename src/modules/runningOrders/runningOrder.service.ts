@@ -71,7 +71,7 @@ export const saveRunningOrderService = async (data: any) => {
     0,
   );
 
-  // Create batch + update total atomically
+  // Create batch + update total + reset kitchenStatus so kitchen sees new items
   await prisma.$transaction([
     prisma.runningOrderBatch.create({
       data: {
@@ -89,7 +89,10 @@ export const saveRunningOrderService = async (data: any) => {
     }),
     prisma.runningOrder.update({
       where: { id: runningOrder.id },
-      data: { totalAmount: { increment: batchTotal } },
+      data: {
+        totalAmount: { increment: batchTotal },
+        kitchenStatus: "PENDING",
+      },
     }),
   ]);
 
@@ -121,12 +124,13 @@ export const getAllRunningOrdersService = async (
   restaurantId: number,
   branchId: number,
 ) => {
+  // Return ALL active orders — kitchen filters PENDING/PREPARING client-side;
+  // billing needs READY/DELIVERED orders too to colour table cards correctly.
   const orders = await prisma.runningOrder.findMany({
     where: {
       restaurantId,
       branchId,
       status: "ACTIVE",
-      kitchenStatus: { in: ["PENDING", "PREPARING"] },
     },
     include: {
       batches: {
