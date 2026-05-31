@@ -20,7 +20,14 @@ export const getCustomersByBranchService = async (
       createdAt: true,
       bills: {
         where: { ...(branchId && { branchId }) },
-        select: { total: true, createdAt: true },
+        select: {
+          id: true,
+          total: true,
+          orderType: true,
+          paymentMethod: true,
+          status: true,
+          createdAt: true,
+        },
         orderBy: { createdAt: "desc" },
       },
     },
@@ -34,6 +41,9 @@ export const getCustomersByBranchService = async (
     visits: bills.length,
     spend: bills.reduce((sum, bill) => sum + bill.total, 0),
     lastVisit: bills[0]?.createdAt ?? null,
+    preferredOrderType: bills[0]?.orderType ?? null,
+    preferredPayment: bills[0]?.paymentMethod ?? null,
+    bills,
   }));
 };
 
@@ -52,7 +62,14 @@ export const getCustomersByRestaurantService = async (
       address: true,
       createdAt: true,
       bills: {
-        select: { total: true, createdAt: true },
+        select: {
+          id: true,
+          total: true,
+          orderType: true,
+          paymentMethod: true,
+          status: true,
+          createdAt: true,
+        },
         orderBy: { createdAt: "desc" },
       },
     },
@@ -66,5 +83,8 @@ export const getCustomersByRestaurantService = async (
     visits: bills.length,
     spend: bills.reduce((sum, bill) => sum + bill.total, 0),
     lastVisit: bills[0]?.createdAt ?? null,
+    preferredOrderType: bills[0]?.orderType ?? null,
+    preferredPayment: bills[0]?.paymentMethod ?? null,
+    bills,
   }));
 };
