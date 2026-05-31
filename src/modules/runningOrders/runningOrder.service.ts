@@ -112,7 +112,11 @@ export const updateRunningOrderStatusService = async (
 ) => {
   return prisma.runningOrder.update({
     where: { id: orderId },
-    data: { kitchenStatus: status },
+    data: {
+      kitchenStatus: status,
+      // Record when kitchen marks the order done so the billing view can show it
+      ...(status === "READY" && { completedAt: new Date() }),
+    },
   });
 };
 
