@@ -106,6 +106,45 @@ export const getAllRunningOrdersService = async (
   }));
 };
 
+// ── Item-level cancel request flow ──────────────────────────────────────────
+
+export const requestItemCancelService = async (itemId: number) => {
+  return prisma.runningOrderBatchItem.update({
+    where: { id: itemId },
+    data: { status: "CANCEL_REQUESTED" },
+  });
+};
+
+export const approveItemCancelService = async (itemId: number) => {
+  const item = await prisma.runningOrderBatchItem.findUnique({
+    where: { id: itemId },
+  });
+  if (!item) throw new Error("Item not found");
+
+  const batch = await prisma.runningOrderBatch.findUnique({
+    where: { id: item.runningOrderBatchId },
+  });
+  if (!batch) throw new Error("Batch not found");
+
+  await prisma.$transaction([
+    prisma.runningOrderBatchItem.update({
+      where: { id: itemId },
+      data: { status: "CANCELLED" },
+    }),
+    prisma.runningOrder.update({
+      where: { id: batch.runningOrderId },
+      data: { totalAmount: { decrement: item.total } },
+    }),
+  ]);
+};
+
+export const rejectItemCancelService = async (itemId: number) => {
+  return prisma.runningOrderBatchItem.update({
+    where: { id: itemId },
+    data: { status: "PENDING" },
+  });
+};
+
 export const updateRunningOrderStatusService = async (
   orderId: number,
   status: string,

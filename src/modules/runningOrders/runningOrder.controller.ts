@@ -5,6 +5,9 @@ import {
   closeRunningOrderService,
   getAllRunningOrdersService,
   updateRunningOrderStatusService,
+  requestItemCancelService,
+  approveItemCancelService,
+  rejectItemCancelService,
 } from "./runningOrder.service";
 
 export const saveRunningOrder = async (req: Request, res: Response) => {
@@ -67,6 +70,33 @@ export const updateRunningOrderStatus = async (req: Request, res: Response) => {
     const { status } = req.body;
     const response = await updateRunningOrderStatusService(orderId, status);
     return res.status(200).json({ success: true, data: response });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const requestItemCancel = async (req: Request, res: Response) => {
+  try {
+    await requestItemCancelService(Number(req.params.itemId));
+    return res.status(200).json({ success: true });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const approveItemCancel = async (req: Request, res: Response) => {
+  try {
+    await approveItemCancelService(Number(req.params.itemId));
+    return res.status(200).json({ success: true });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const rejectItemCancel = async (req: Request, res: Response) => {
+  try {
+    await rejectItemCancelService(Number(req.params.itemId));
+    return res.status(200).json({ success: true });
   } catch (error: any) {
     return res.status(400).json({ success: false, message: error.message });
   }
