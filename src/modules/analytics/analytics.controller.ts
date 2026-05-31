@@ -7,6 +7,10 @@ import {
   getRestaurantInsightsData,
   saveRestaurantInsightsData,
 } from "./analytics.service";
+import {
+  getBranchComparisonService,
+  getCityComparisonService,
+} from "./branchComparison.service";
 
 export const getRestaurantDashboardOverview = async (
   req: Request,
@@ -139,14 +143,32 @@ export const getDashboardOverview = async (req: Request, res: Response) => {
   try {
     const range = req.query.range as string;
     const data = await getDashboardOverviewDataService(range);
-    return res.status(200).json({
-      success: true,
-      data,
-    });
+    return res.status(200).json({ success: true, data });
   } catch (error: any) {
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const getBranchComparison = async (req: Request, res: Response) => {
+  try {
+    const restaurantId = Number(req.params.restaurantId);
+    const from = req.query.from as string | undefined;
+    const to = req.query.to as string | undefined;
+    const data = await getBranchComparisonService(restaurantId, from, to);
+    return res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const getCityComparison = async (req: Request, res: Response) => {
+  try {
+    const restaurantId = Number(req.params.restaurantId);
+    const from = req.query.from as string | undefined;
+    const to = req.query.to as string | undefined;
+    const data = await getCityComparisonService(restaurantId, from, to);
+    return res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
   }
 };
