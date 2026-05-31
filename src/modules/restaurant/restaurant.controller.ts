@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 
+import prisma from "../../config/prisma";
 import {
   setupRestaurantService,
   getShopsService,
@@ -178,10 +179,27 @@ export const deleteRestaurantTable = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.log(error);
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
 
-    return res.status(400).json({
-      success: false,
-      message: error.message,
+// Update restaurant logo from the Shops page
+export const updateRestaurantLogo = async (req: any, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "No file uploaded" });
+    }
+    const restaurantId = Number(req.body.restaurantId);
+    if (!restaurantId) {
+      return res.status(400).json({ success: false, message: "restaurantId is required" });
+    }
+    const logoPath = `/uploads/${req.file.filename}`;
+    await prisma.restaurant.update({
+      where: { id: restaurantId },
+      data: { logo: logoPath },
     });
+    return res.status(200).json({ success: true, logo: logoPath });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

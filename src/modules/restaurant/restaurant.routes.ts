@@ -10,12 +10,14 @@ import {
   getTablesController,
   createRestaurantTable,
   deleteRestaurantTable,
+  updateRestaurantLogo,
 } from "./restaurant.controller";
 
 import {
   getRestaurantSettings,
   updateBranches,
   updateGeneralSettings,
+  createBranch,
 } from "../settings/settings.controller";
 
 import { authMiddleware } from "../../middleware/auth";
@@ -32,10 +34,12 @@ router.get("/staff/:restaurantId/:branchId", getRestaurantStaff);
 router.get("/table/:restaurantId/:branchId", getTablesController);
 router.post("/restaurant-table/create", authMiddleware, createRestaurantTable);
 router.delete("/restaurant-table/delete/:id", authMiddleware, deleteRestaurantTable);
+router.post("/update-logo", authMiddleware, upload.single("logo"), updateRestaurantLogo);
 
 // Settings aliases — frontend calls /api/restaurant/settings/... instead of /api/settings/...
 router.get("/settings/:restaurantId", authMiddleware, getRestaurantSettings);
 router.put("/branches/update", authMiddleware, updateBranches);
 router.put("/general/:id", authMiddleware, updateGeneralSettings);
+router.post("/branches/create", authMiddleware, createBranch);
 
 export default router;
