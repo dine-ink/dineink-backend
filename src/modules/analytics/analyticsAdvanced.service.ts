@@ -1,0 +1,460 @@
+import prisma from "../../config/prisma";
+
+const toNum = (v: any) => Number(v) || 0;
+
+const buildDateFilter = (from?: string, to?: string) =>
+  from && to
+    ? { createdAt: { gte: new Date(from), lte: new Date(to + "T23:59:59.999Z") } }
+    : {};
+
+const HOUR_LABEL = (h: number) =>
+  h === 0 ? "12 AM" : h < 12 ? `${h} AM` : h === 12 ? "12 PM" : `${h - 12} PM`;
+
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+// ─── 1. Kitchen Analytics ────────────────────────────────────────────────────
+
+export const getKitchenAnalyticsService = async (
+  restaurantId: number,
+  branchId?: number,
+  from?: string,
+  to?: string,
+) => {
+  const dateFilter = buildDateFilter(from, to);
+  const branchFilter = branchId ? { branchId } : {};
+  const SLA_MINUTES = 30;
+
+  const orders = await prisma.runningOrder.findMany({
+    where: { restaurantId, ...branchFilter, completedAt: { not: null }, ...dateFilter },
+    select: {
+      id: true,
+      startedAt: true,
+      completedAt: true,
+      orderType: true,
+      tableId: true,
+      table: { select: { name: true } },
+      batches: {
+        select: {
+          createdAt: true,
+          items: { select: { itemName: true, quantity: true, status: true } },
+        },
+      },
+    },
+  });
+
+  // Compute durations, filter anomalies (negative or > 5 hours)
+  const timed = orders
+    .filter((o) => o.completedAt)
+    .map((o) => {
+      const mins = Math.round(
+        (new Date(o.completedAt!).getTime() - new Date(o.startedAt).getTime()) / 60000,
+      );
+      return {
+        ...o,
+        mins,
+        hour: new Date(o.startedAt).getHours(),
+        dateStr: new Date(o.startedAt).toLocaleDateString("en-IN"),
+      };
+    })
+    .filter((o) => o.mins > 0 && o.mins < 300);
+
+  const total = timed.length;
+  const avgTime = total ? Math.round(timed.reduce((s, o) => s + o.mins, 0) / total) : 0;
+  const slaPercent = total ? Math.round((timed.filter((o) => o.mins <= SLA_MINUTES).length / total) * 100) : 0;
+  const fastestOrder = total ? Math.min(...timed.map((o) => o.mins)) : 0;
+  const slowestOrderTime = total ? Math.max(...timed.map((o) => o.mins)) : 0;
+
+  // Hourly throughput
+  const hourlyMap: Record<number, { count: number; totalMins: number }> = {};
+  for (let h = 0; h < 24; h++) hourlyMap[h] = { count: 0, totalMins: 0 };
+  timed.forEach((o) => { hourlyMap[o.hour].count++; hourlyMap[o.hour].totalMins += o.mins; });
+  const hourlyData = Object.entries(hourlyMap).map(([h, d]) => ({
+    hour: Number(h),
+    label: HOUR_LABEL(Number(h)),
+    orders: d.count,
+    avgTime: d.count ? Math.round(d.totalMins / d.count) : 0,
+  }));
+  const peakHour = hourlyData.reduce((b, h) => (h.orders > b.orders ? h : b), hourlyData[0]);
+
+  // Daily trend
+  const dailyMap: Record<string, { orders: number; totalMins: number }> = {};
+  timed.forEach((o) => {
+    if (!dailyMap[o.dateStr]) dailyMap[o.dateStr] = { orders: 0, totalMins: 0 };
+    dailyMap[o.dateStr].orders++;
+    dailyMap[o.dateStr].totalMins += o.mins;
+  });
+  const dailyTrend = Object.entries(dailyMap).map(([date, d]) => ({
+    date,
+    orders: d.orders,
+    avgTime: Math.round(d.totalMins / d.orders),
+  }));
+
+  // Table turn times
+  const tableMap: Record<number, { name: string; count: number; totalMins: number }> = {};
+  timed.filter((o) => o.tableId).forEach((o) => {
+    const tid = o.tableId!;
+    if (!tableMap[tid]) tableMap[tid] = { name: o.table?.name || `Table ${tid}`, count: 0, totalMins: 0 };
+    tableMap[tid].count++;
+    tableMap[tid].totalMins += o.mins;
+  });
+  const tableTurnData = Object.values(tableMap)
+    .map((t) => ({ ...t, avgTime: Math.round(t.totalMins / t.count) }))
+    .sort((a, b) => b.count - a.count);
+
+  // Top items from kitchen batches
+  const itemCounts: Record<string, number> = {};
+  orders.forEach((o) => o.batches.forEach((b) => b.items.forEach((i) => {
+    itemCounts[i.itemName] = (itemCounts[i.itemName] || 0) + i.quantity;
+  })));
+  const topItems = Object.entries(itemCounts)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  // Order type speed breakdown
+  const typeMap: Record<string, { count: number; totalMins: number }> = {};
+  timed.forEach((o) => {
+    const t = o.orderType || "DINE_IN";
+    if (!typeMap[t]) typeMap[t] = { count: 0, totalMins: 0 };
+    typeMap[t].count++;
+    typeMap[t].totalMins += o.mins;
+  });
+  const orderTypeSpeeds = Object.entries(typeMap).map(([type, d]) => ({
+    type,
+    count: d.count,
+    avgTime: Math.round(d.totalMins / d.count),
+  }));
+
+  // Slowest 10 orders for investigation
+  const slowestOrders = [...timed]
+    .sort((a, b) => b.mins - a.mins)
+    .slice(0, 10)
+    .map((o) => ({
+      id: o.id,
+      orderType: o.orderType || "DINE_IN",
+      tableName: o.table?.name ?? null,
+      durationMinutes: o.mins,
+      startedAt: o.startedAt,
+    }));
+
+  return {
+    summary: { totalOrders: total, avgTime, slaPercent, fastestOrder, slowestOrderTime, peakHourLabel: peakHour?.label },
+    hourlyData,
+    dailyTrend,
+    tableTurnData,
+    topItems,
+    orderTypeSpeeds,
+    slowestOrders,
+  };
+};
+
+// ─── 2. Hourly Revenue Heatmap ────────────────────────────────────────────────
+
+export const getHourlyHeatmapService = async (
+  restaurantId: number,
+  branchId?: number,
+  from?: string,
+  to?: string,
+) => {
+  const dateFilter = buildDateFilter(from, to);
+  const branchFilter = branchId ? { branchId } : {};
+
+  const bills = await prisma.bill.findMany({
+    where: { restaurantId, ...branchFilter, ...dateFilter },
+    select: { total: true, createdAt: true },
+  });
+
+  const byHour: Record<number, { revenue: number; orders: number }> = {};
+  const byDay: Record<number, { revenue: number; orders: number }> = {};
+  const heatmapRaw: Record<string, number> = {};
+
+  for (let h = 0; h < 24; h++) byHour[h] = { revenue: 0, orders: 0 };
+  for (let d = 0; d < 7; d++) byDay[d] = { revenue: 0, orders: 0 };
+
+  bills.forEach((b) => {
+    const d = new Date(b.createdAt);
+    const h = d.getHours();
+    const day = d.getDay();
+    byHour[h].revenue += b.total;
+    byHour[h].orders++;
+    byDay[day].revenue += b.total;
+    byDay[day].orders++;
+    const key = `${day}-${h}`;
+    heatmapRaw[key] = (heatmapRaw[key] || 0) + b.total;
+  });
+
+  const hourlyData = Object.entries(byHour).map(([h, d]) => ({
+    hour: Number(h),
+    label: HOUR_LABEL(Number(h)),
+    revenue: Math.round(d.revenue),
+    orders: d.orders,
+    avgBill: d.orders ? Math.round(d.revenue / d.orders) : 0,
+  }));
+
+  const dailyData = Object.entries(byDay).map(([day, d]) => ({
+    day: Number(day),
+    name: DAY_NAMES[Number(day)],
+    short: DAY_NAMES[Number(day)].slice(0, 3),
+    revenue: Math.round(d.revenue),
+    orders: d.orders,
+    avgBill: d.orders ? Math.round(d.revenue / d.orders) : 0,
+  }));
+
+  const heatmapGrid = [];
+  const maxRevenue = Math.max(...Object.values(heatmapRaw), 1);
+  for (let day = 0; day < 7; day++) {
+    for (let h = 0; h < 24; h++) {
+      const rev = Math.round(heatmapRaw[`${day}-${h}`] || 0);
+      heatmapGrid.push({
+        day, h, dayName: DAY_NAMES[day].slice(0, 3),
+        hourLabel: HOUR_LABEL(h),
+        revenue: rev,
+        intensity: Math.round((rev / maxRevenue) * 100),
+      });
+    }
+  }
+
+  const peakHour = hourlyData.reduce((b, h) => (h.revenue > b.revenue ? h : b), hourlyData[0]);
+  const peakDay = dailyData.reduce((b, d) => (d.revenue > b.revenue ? d : b), dailyData[0]);
+
+  return { hourlyData, dailyData, heatmapGrid, peakHour, peakDay };
+};
+
+// ─── 3. Customer RFM Scoring ──────────────────────────────────────────────────
+
+export const getCustomerRFMService = async (
+  restaurantId: number,
+  branchId?: number,
+) => {
+  const branchFilter = branchId ? { branchId } : {};
+
+  const customers = await prisma.customer.findMany({
+    where: { restaurantId },
+    select: {
+      id: true,
+      name: true,
+      phone: true,
+      createdAt: true,
+      bills: {
+        where: { ...branchFilter, status: "PAID" },
+        select: { total: true, createdAt: true },
+        orderBy: { createdAt: "desc" },
+      },
+    },
+  });
+
+  const now = new Date();
+
+  const scored = customers
+    .filter((c) => c.bills.length > 0)
+    .map((c) => {
+      const recencyDays = Math.floor(
+        (now.getTime() - new Date(c.bills[0].createdAt).getTime()) / 86400000,
+      );
+      const frequency = c.bills.length;
+      const monetary = Math.round(c.bills.reduce((s, b) => s + b.total, 0));
+
+      const R = recencyDays <= 7 ? 5 : recencyDays <= 30 ? 4 : recencyDays <= 60 ? 3 : recencyDays <= 90 ? 2 : 1;
+      const F = frequency >= 10 ? 5 : frequency >= 5 ? 4 : frequency >= 3 ? 3 : frequency >= 2 ? 2 : 1;
+      const M = monetary >= 10000 ? 5 : monetary >= 5000 ? 4 : monetary >= 2000 ? 3 : monetary >= 500 ? 2 : 1;
+      const rfm = R + F + M;
+
+      const segment =
+        rfm >= 13 ? "Champion" :
+        rfm >= 10 ? "Loyal" :
+        rfm >= 7 ? "Potential" :
+        rfm >= 5 ? "At Risk" : "Lost";
+
+      return { id: c.id, name: c.name, phone: c.phone, R, F, M, rfm, segment, recencyDays, frequency, monetary, lastVisit: c.bills[0].createdAt };
+    })
+    .sort((a, b) => b.rfm - a.rfm);
+
+  const segmentCounts = scored.reduce((acc: Record<string, number>, c) => {
+    acc[c.segment] = (acc[c.segment] || 0) + 1;
+    return acc;
+  }, {});
+
+  const segmentRevenue = scored.reduce((acc: Record<string, number>, c) => {
+    acc[c.segment] = (acc[c.segment] || 0) + c.monetary;
+    return acc;
+  }, {});
+
+  return {
+    customers: scored,
+    segmentCounts,
+    segmentRevenue,
+    total: scored.length,
+  };
+};
+
+// ─── 4. Staff Productivity ────────────────────────────────────────────────────
+
+export const getStaffProductivityService = async (
+  restaurantId: number,
+  branchId?: number,
+  from?: string,
+  to?: string,
+) => {
+  const dateRange = from && to
+    ? { date: { gte: new Date(from), lte: new Date(to + "T23:59:59.999Z") } }
+    : {};
+  const branchFilter = branchId ? { branchId } : {};
+
+  const [staff, bills] = await Promise.all([
+    prisma.user.findMany({
+      where: { restaurantId, ...branchFilter, isDeleted: false },
+      select: {
+        id: true, name: true, role: true, department: true, salary: true, shift: true,
+        attendances: {
+          where: { ...branchFilter, ...dateRange },
+          select: { totalHours: true, loginTime: true, status: true },
+        },
+      },
+    }),
+    prisma.bill.findMany({
+      where: { restaurantId, ...branchFilter, ...buildDateFilter(from, to) },
+      select: { total: true, createdAt: true },
+    }),
+  ]);
+
+  // Revenue bucketed by shift hours
+  const shiftRevenue = { morning: 0, afternoon: 0, evening: 0, night: 0 };
+  bills.forEach((b) => {
+    const h = new Date(b.createdAt).getHours();
+    if (h >= 6 && h < 12) shiftRevenue.morning += b.total;
+    else if (h >= 12 && h < 17) shiftRevenue.afternoon += b.total;
+    else if (h >= 17 && h < 22) shiftRevenue.evening += b.total;
+    else shiftRevenue.night += b.total;
+  });
+
+  const staffData = staff.map((s) => {
+    const totalHours = toNum(s.attendances.reduce((sum, a) => sum + toNum(a.totalHours), 0));
+    const daysPresent = s.attendances.filter((a) => a.loginTime || a.status === "PRESENT").length;
+    const attendanceRate = s.attendances.length
+      ? Math.round((daysPresent / s.attendances.length) * 100)
+      : 0;
+    const monthlySalary = s.salary || 0;
+
+    return {
+      id: s.id, name: s.name, role: s.role,
+      department: s.department || "—",
+      shift: s.shift || "—",
+      monthlySalary,
+      totalHours: Math.round(totalHours),
+      daysPresent,
+      attendanceRate,
+      dailyCost: Math.round(monthlySalary / 30),
+      costPerHour: totalHours > 0 ? Math.round(monthlySalary / (totalHours * 4.33)) : 0,
+    };
+  });
+
+  // Department breakdown
+  const deptMap: Record<string, { count: number; salary: number; hours: number }> = {};
+  staffData.forEach((s) => {
+    const d = s.department;
+    if (!deptMap[d]) deptMap[d] = { count: 0, salary: 0, hours: 0 };
+    deptMap[d].count++;
+    deptMap[d].salary += s.monthlySalary;
+    deptMap[d].hours += s.totalHours;
+  });
+  const deptData = Object.entries(deptMap).map(([dept, d]) => ({
+    dept, count: d.count,
+    totalSalary: Math.round(d.salary),
+    totalHours: Math.round(d.hours),
+    avgSalary: d.count ? Math.round(d.salary / d.count) : 0,
+  }));
+
+  return {
+    staff: staffData,
+    deptData,
+    shiftRevenue: {
+      morning: Math.round(shiftRevenue.morning),
+      afternoon: Math.round(shiftRevenue.afternoon),
+      evening: Math.round(shiftRevenue.evening),
+      night: Math.round(shiftRevenue.night),
+    },
+    totals: {
+      totalLabourCost: staffData.reduce((s, st) => s + st.monthlySalary, 0),
+      totalHoursWorked: staffData.reduce((s, st) => s + st.totalHours, 0),
+      totalStaff: staffData.length,
+    },
+  };
+};
+
+// ─── 5. Revenue Forecast (rolling 7-day average) ─────────────────────────────
+
+export const getRevenueForecastService = async (
+  restaurantId: number,
+  branchId?: number,
+) => {
+  const branchFilter = branchId ? { branchId } : {};
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  const bills = await prisma.bill.findMany({
+    where: {
+      restaurantId,
+      ...branchFilter,
+      createdAt: { gte: thirtyDaysAgo },
+    },
+    select: { total: true, createdAt: true },
+    orderBy: { createdAt: "asc" },
+  });
+
+  // Group by date
+  const byDate: Record<string, number> = {};
+  bills.forEach((b) => {
+    const key = new Date(b.createdAt).toLocaleDateString("en-IN");
+    byDate[key] = (byDate[key] || 0) + b.total;
+  });
+
+  // Fill missing dates with 0
+  const history: { date: string; revenue: number }[] = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = d.toLocaleDateString("en-IN");
+    history.push({ date: key, revenue: Math.round(byDate[key] || 0) });
+  }
+
+  // 7-day rolling average for the last 7 days
+  const last7 = history.slice(-7);
+  const avg7 = last7.length ? Math.round(last7.reduce((s, d) => s + d.revenue, 0) / last7.length) : 0;
+
+  // Previous 7 days
+  const prev7 = history.slice(-14, -7);
+  const avgPrev7 = prev7.length ? Math.round(prev7.reduce((s, d) => s + d.revenue, 0) / prev7.length) : 0;
+
+  const growthPercent = avgPrev7 > 0 ? parseFloat(((avg7 - avgPrev7) / avgPrev7 * 100).toFixed(1)) : 0;
+
+  // Forecast next 7 days using 7-day rolling average + growth trend
+  const growthFactor = avgPrev7 > 0 ? avg7 / avgPrev7 : 1;
+  const forecast: { date: string; predicted: number; lower: number; upper: number }[] = [];
+  for (let i = 1; i <= 7; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    const predicted = Math.round(avg7 * Math.pow(growthFactor, i / 7));
+    forecast.push({
+      date: d.toLocaleDateString("en-IN"),
+      predicted,
+      lower: Math.round(predicted * 0.85),
+      upper: Math.round(predicted * 1.15),
+    });
+  }
+
+  // Week-over-week breakdown
+  const weeklyRevenue = Array.from({ length: 4 }, (_, i) => {
+    const week = history.slice(i * 7, (i + 1) * 7);
+    return {
+      week: `Week ${i + 1}`,
+      revenue: Math.round(week.reduce((s, d) => s + d.revenue, 0)),
+    };
+  });
+
+  return {
+    history,
+    forecast,
+    summary: { avg7, avgPrev7, growthPercent, forecastTotal: forecast.reduce((s, f) => s + f.predicted, 0) },
+    weeklyRevenue,
+  };
+};

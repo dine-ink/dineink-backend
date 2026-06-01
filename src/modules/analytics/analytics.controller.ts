@@ -11,6 +11,13 @@ import {
   getBranchComparisonService,
   getCityComparisonService,
 } from "./branchComparison.service";
+import {
+  getKitchenAnalyticsService,
+  getHourlyHeatmapService,
+  getCustomerRFMService,
+  getStaffProductivityService,
+  getRevenueForecastService,
+} from "./analyticsAdvanced.service";
 
 export const getRestaurantDashboardOverview = async (
   req: Request,
@@ -167,6 +174,65 @@ export const getCityComparison = async (req: Request, res: Response) => {
     const from = req.query.from as string | undefined;
     const to = req.query.to as string | undefined;
     const data = await getCityComparisonService(restaurantId, from, to);
+    return res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+const extractParams = (req: Request) => ({
+  restaurantId: Number(req.params.restaurantId),
+  branchId: req.query.branchId ? Number(req.query.branchId) : undefined,
+  from: req.query.from as string | undefined,
+  to: req.query.to as string | undefined,
+});
+
+export const getKitchenAnalytics = async (req: Request, res: Response) => {
+  try {
+    const { restaurantId, branchId, from, to } = extractParams(req);
+    const data = await getKitchenAnalyticsService(restaurantId, branchId, from, to);
+    return res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const getHourlyHeatmap = async (req: Request, res: Response) => {
+  try {
+    const { restaurantId, branchId, from, to } = extractParams(req);
+    const data = await getHourlyHeatmapService(restaurantId, branchId, from, to);
+    return res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const getCustomerRFM = async (req: Request, res: Response) => {
+  try {
+    const restaurantId = Number(req.params.restaurantId);
+    const branchId = req.query.branchId ? Number(req.query.branchId) : undefined;
+    const data = await getCustomerRFMService(restaurantId, branchId);
+    return res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const getStaffProductivity = async (req: Request, res: Response) => {
+  try {
+    const { restaurantId, branchId, from, to } = extractParams(req);
+    const data = await getStaffProductivityService(restaurantId, branchId, from, to);
+    return res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const getRevenueForecast = async (req: Request, res: Response) => {
+  try {
+    const restaurantId = Number(req.params.restaurantId);
+    const branchId = req.query.branchId ? Number(req.query.branchId) : undefined;
+    const data = await getRevenueForecastService(restaurantId, branchId);
     return res.status(200).json({ success: true, data });
   } catch (error: any) {
     return res.status(400).json({ success: false, message: error.message });
