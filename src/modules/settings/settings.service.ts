@@ -52,7 +52,7 @@ export const updateBranchesService = async (body: any) => {
 };
 
 export const createBranchService = async (restaurantId: number, data: any) => {
-  return prisma.branch.create({
+  const branch = await prisma.branch.create({
     data: {
       restaurantId,
       name: data.name || "New Branch",
@@ -63,6 +63,40 @@ export const createBranchService = async (restaurantId: number, data: any) => {
       state: data.state || null,
       pincode: data.pincode || null,
     },
+  });
+
+  // Create billing settings if provided
+  if (data.billing) {
+    const b = data.billing;
+    await prisma.billingSettings.create({
+      data: {
+        branchId: branch.id,
+        billingTypes: b.billingTypes || [],
+        gstPercentage: Number(b.gstPercentage) || 0,
+        serviceCharge: Number(b.serviceCharge) || 0,
+        includeGST: b.includeGST ?? false,
+        enableDiscount: b.enableDiscount ?? true,
+        enableTips: b.enableTips ?? false,
+        paymentMethods: b.paymentMethods || [],
+      },
+    });
+  }
+
+  // Create tables if provided
+  if (data.tables?.length) {
+    await prisma.restaurantTable.createMany({
+      data: data.tables.map((t: any) => ({
+        restaurantId,
+        branchId: branch.id,
+        name: t.name,
+        capacity: t.capacity || 4,
+      })),
+    });
+  }
+
+  return prisma.branch.findUnique({
+    where: { id: branch.id },
+    include: { billing: true },
   });
 };
 
