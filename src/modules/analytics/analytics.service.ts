@@ -56,13 +56,16 @@ function getDateRange(
   let endDate = new Date();
   endDate.setHours(23, 59, 59, 999);
 
-  if (range === "custom" && from && to) {
+  // Always prefer explicit from/to when provided (frontend computes rolling windows)
+  if (from && to) {
     startDate = new Date(from);
+    startDate.setHours(0, 0, 0, 0);
     endDate = new Date(to);
     endDate.setHours(23, 59, 59, 999);
     return { startDate, endDate };
   }
 
+  // Fallback when no from/to supplied
   switch (range) {
     case "today":
       startDate.setHours(0, 0, 0, 0);
@@ -71,10 +74,10 @@ function getDateRange(
       startDate.setDate(startDate.getDate() - 6);
       break;
     case "month":
-      startDate = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+      startDate.setDate(startDate.getDate() - 29);
       break;
     case "quarter":
-      startDate.setMonth(startDate.getMonth() - 3);
+      startDate.setDate(startDate.getDate() - 89);
       break;
     default:
       startDate.setHours(0, 0, 0, 0);
