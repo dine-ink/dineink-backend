@@ -11,6 +11,8 @@ import {
   getTablesService,
   createRestaurantTableService,
   deleteRestaurantTableService,
+  createStaffService,
+  updateStaffService,
 } from "./restaurant.service";
 
 export const setupRestaurant = async (req: any, res: Response) => {
@@ -199,6 +201,25 @@ export const updateRestaurantLogo = async (req: any, res: Response) => {
       data: { logo: logoPath },
     });
     return res.status(200).json({ success: true, logo: logoPath });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const createStaff = async (req: any, res: Response) => {
+  try {
+    const staff = await createStaffService(req.body);
+    return res.status(201).json({ success: true, data: staff });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const updateStaff = async (req: any, res: Response) => {
+  try {
+    const userId = Number(req.params.id);
+    const staff = await updateStaffService(userId, req.body);
+    return res.status(200).json({ success: true, data: staff });
   } catch (error: any) {
     return res.status(500).json({ success: false, message: error.message });
   }

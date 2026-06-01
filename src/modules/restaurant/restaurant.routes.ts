@@ -11,6 +11,8 @@ import {
   createRestaurantTable,
   deleteRestaurantTable,
   updateRestaurantLogo,
+  createStaff,
+  updateStaff,
 } from "./restaurant.controller";
 
 import {
@@ -35,6 +37,8 @@ router.get("/table/:restaurantId/:branchId", getTablesController);
 router.post("/restaurant-table/create", authMiddleware, createRestaurantTable);
 router.delete("/restaurant-table/delete/:id", authMiddleware, deleteRestaurantTable);
 router.post("/update-logo", authMiddleware, upload.single("logo"), updateRestaurantLogo);
+router.post("/staff/create", authMiddleware, createStaff);
+router.put("/staff/:id", authMiddleware, updateStaff);
 
 // Settings aliases — frontend calls /api/restaurant/settings/... instead of /api/settings/...
 router.get("/settings/:restaurantId", authMiddleware, getRestaurantSettings);

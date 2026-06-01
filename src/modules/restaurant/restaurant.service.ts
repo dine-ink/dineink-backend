@@ -246,11 +246,69 @@ export const getBranchDetailsService = async (branchId: number) => {
 };
 
 export const updateBranchDetailsService = async (branchId: number, body: any) => {
-  const { name, address, phone } = body;
-  return prisma.branch.update({
+  const { name, address, phone, email, city, state, pincode, tables, billing } = body;
+
+  // 1. Update branch fields
+  await prisma.branch.update({
     where: { id: branchId },
-    data: { name, address, phone },
+    data: { name, address, phone, email: email || null, city: city || null, state: state || null, pincode: pincode || null },
   });
+
+  // 2. Upsert billing settings
+  if (billing) {
+    await prisma.billingSettings.upsert({
+      where: { branchId },
+      create: {
+        branchId,
+        billingTypes: billing.billingTypes || [],
+        gstPercentage: Number(billing.gstPercentage) || 0,
+        serviceCharge: Number(billing.serviceCharge) || 0,
+        includeGST: billing.includeGST ?? false,
+        enableDiscount: billing.enableDiscount ?? true,
+        enableTips: billing.enableTips ?? false,
+        paymentMethods: billing.paymentMethods || [],
+      },
+      update: {
+        billingTypes: billing.billingTypes || [],
+        gstPercentage: Number(billing.gstPercentage) || 0,
+        serviceCharge: Number(billing.serviceCharge) || 0,
+        includeGST: billing.includeGST ?? false,
+        enableDiscount: billing.enableDiscount ?? true,
+        enableTips: billing.enableTips ?? false,
+        paymentMethods: billing.paymentMethods || [],
+      },
+    });
+  }
+
+  // 3. Sync tables
+  if (Array.isArray(tables)) {
+    const branch = await prisma.branch.findUnique({ where: { id: branchId }, select: { restaurantId: true } });
+    const restaurantId = branch!.restaurantId;
+
+    const existingIds = (await prisma.restaurantTable.findMany({ where: { branchId }, select: { id: true } })).map(t => t.id);
+    const incomingIds = tables.filter((t: any) => !t._isNew).map((t: any) => Number(t.id));
+
+    // Delete tables removed by user
+    const toDelete = existingIds.filter(id => !incomingIds.includes(id));
+    if (toDelete.length) await prisma.restaurantTable.deleteMany({ where: { id: { in: toDelete } } });
+
+    // Update existing tables
+    await Promise.all(
+      tables.filter((t: any) => !t._isNew).map((t: any) =>
+        prisma.restaurantTable.update({ where: { id: Number(t.id) }, data: { name: t.name, capacity: t.capacity ? Number(t.capacity) : null } })
+      )
+    );
+
+    // Create new tables
+    const newTables = tables.filter((t: any) => t._isNew && t.name);
+    if (newTables.length) {
+      await prisma.restaurantTable.createMany({
+        data: newTables.map((t: any) => ({ name: t.name, capacity: t.capacity ? Number(t.capacity) : null, status: "AVAILABLE", restaurantId, branchId })),
+      });
+    }
+  }
+
+  return prisma.branch.findUnique({ where: { id: branchId }, include: { billing: true } });
 };
 
 export const getRestaurantStaffData = async (
@@ -339,6 +397,43 @@ export const createRestaurantTableService = async (body: any) => {
   return table;
 };
 
+export const createStaffService = async (data: any) => {
+  const hashedPassword = await bcrypt.hash(data.password || "1234", 10);
+  return prisma.user.create({
+    data: {
+      restaurantId: Number(data.restaurantId),
+      branchId: data.branchId ? Number(data.branchId) : null,
+      name: data.name,
+      email: data.email || null,
+      phone: data.phone || null,
+      password: hashedPassword,
+      role: data.role || "STAFF",
+      hasLogin: data.hasLogin ?? false,
+      salary: data.salary ? Number(data.salary) : null,
+      joiningDate: data.joiningDate ? new Date(data.joiningDate) : null,
+      shift: data.shift || null,
+      department: data.department || null,
+    },
+  });
+};
+
+export const updateStaffService = async (userId: number, data: any) => {
+  const updateData: any = {
+    name: data.name,
+    email: data.email || null,
+    phone: data.phone || null,
+    role: data.role || "STAFF",
+    hasLogin: data.hasLogin ?? false,
+    salary: data.salary ? Number(data.salary) : null,
+    joiningDate: data.joiningDate ? new Date(data.joiningDate) : null,
+    shift: data.shift || null,
+    department: data.department || null,
+    branchId: data.branchId ? Number(data.branchId) : null,
+  };
+  if (data.password) updateData.password = await bcrypt.hash(data.password, 10);
+  return prisma.user.update({ where: { id: userId }, data: updateData });
+};
+
 export const deleteRestaurantTableService = async (id: number) => {
   // Check table existence + active order in parallel
   const [table, activeOrder] = await Promise.all([
@@ -372,3 +467,4 @@ export const deleteRestaurantTableService = async (id: number) => {
   await prisma.restaurantTable.delete({ where: { id } });
   return true;
 };
+
