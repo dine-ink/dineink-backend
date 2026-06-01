@@ -217,6 +217,8 @@ export const getBranchDetailsService = async (branchId: number) => {
           select: {
             id: true, name: true, email: true, phone: true,
             role: true, branchId: true, isActive: true,
+            salary: true, department: true, shift: true,
+            joiningDate: true, hasLogin: true,
           },
         },
         tables: { orderBy: { createdAt: "asc" } },
