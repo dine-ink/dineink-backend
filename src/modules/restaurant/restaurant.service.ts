@@ -87,6 +87,7 @@ export const setupRestaurantService = async (userId: number, body: any) => {
               name: item.name,
               price: Number(item.price),
               type: item.type,
+              prepTime: item.prepTime ? Number(item.prepTime) : 0,
             })),
           });
         }
