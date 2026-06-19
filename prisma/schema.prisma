@@ -52,7 +52,10 @@ model Restaurant {
   attendances          Attendance[]
   dailyCashSessions    DailyCashSession[]
   shopExpenses         ShopExpense[]
-  inventoryAdjustments InventoryAdjustment[]
+  inventoryAdjustments     InventoryAdjustment[]
+  vendorPayments           VendorPayment[]
+  vendorInvoices           VendorInvoice[]
+  ingredientPriceHistories IngredientPriceHistory[]
 
   @@index([ownerId])
 }
@@ -87,6 +90,8 @@ model Branch {
   dailyCashSessions    DailyCashSession[]
   shopExpenses         ShopExpense[]
   inventoryAdjustments InventoryAdjustment[]
+  vendorPayments       VendorPayment[]
+  vendorInvoices       VendorInvoice[]
 
   @@index([restaurantId])
 }
@@ -392,6 +397,7 @@ model Ingredient {
   menuItemIngredients  MenuItemIngredient[]
   ingredientVendors    IngredientVendor[]
   inventoryAdjustments InventoryAdjustment[]
+  priceHistory         IngredientPriceHistory[]
 }
 
 model IngredientVendor {
@@ -523,17 +529,84 @@ model Vendor {
   name              String
   address           String?
   phone             String?
+  email             String?
   restaurantId      Int
   branchId          Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
-  branch     Branch?    @relation(fields: [branchId], references: [id])
+  restaurant Restaurant     @relation(fields: [restaurantId], references: [id])
+  branch     Branch?        @relation(fields: [branchId], references: [id])
+  payments   VendorPayment[]
+  invoices   VendorInvoice[]
 
   @@index([restaurantId])
   @@index([branchId])
+}
+
+model VendorPayment {
+  id            Int      @id @default(autoincrement())
+  vendorId      Int
+  restaurantId  Int
+  branchId      Int
+  amount        Float
+  paymentMethod String?
+  notes         String?
+  paymentDate   DateTime
+  createdById   Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  vendor     Vendor     @relation(fields: [vendorId], references: [id])
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch     @relation(fields: [branchId], references: [id])
+
+  @@index([vendorId])
+  @@index([restaurantId])
+  @@index([branchId])
+}
+
+model VendorInvoice {
+  id            Int       @id @default(autoincrement())
+  vendorId      Int
+  restaurantId  Int
+  branchId      Int
+  invoiceNumber String?
+  invoiceDate   DateTime
+  dueDate       DateTime?
+  totalAmount   Float
+  paidAmount    Float     @default(0)
+  status        String    @default("UNPAID")
+  items         Json?
+  notes         String?
+  createdById   Int?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  vendor     Vendor     @relation(fields: [vendorId], references: [id])
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch     @relation(fields: [branchId], references: [id])
+
+  @@index([vendorId])
+  @@index([restaurantId])
+  @@index([branchId])
+}
+
+model IngredientPriceHistory {
+  id           Int        @id @default(autoincrement())
+  ingredientId Int
+  restaurantId Int
+  oldPrice     Float?
+  newPrice     Float
+  changedById  Int?
+  createdAt    DateTime   @default(now())
+
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id])
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+
+  @@index([ingredientId])
+  @@index([restaurantId])
 }
 
 model Attendance {

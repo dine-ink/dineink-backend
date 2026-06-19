@@ -1,5 +1,12 @@
 import * as ingredientService from "./ingredient.service";
 import { Request, Response } from "express";
+import {
+  createVendor,
+  updateVendor,
+  deleteVendor,
+  updateIngredientPrice,
+  getIngredientPriceHistory,
+} from "./ingredient.service";
 
 export const generateIngredients = async (req: any, res: any) => {
   try {
@@ -100,24 +107,64 @@ export const uploadVendors = async (req: any, res: any) => {
 export const getVendors = async (req: Request, res: Response) => {
   try {
     const restaurantId = Number(req.params.restaurantId);
-
     const branchId = Number(req.params.branchId);
-
-    const vendors = await ingredientService.fetchVendorsData(
-      restaurantId,
-      branchId,
-    );
-
-    return res.json({
-      success: true,
-      data: vendors,
-    });
+    const vendors = await ingredientService.fetchVendorsData(restaurantId, branchId);
+    return res.json({ success: true, data: vendors });
   } catch (err) {
     console.log(err);
+    return res.status(500).json({ success: false, message: "Failed to fetch vendors" });
+  }
+};
 
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch vendors",
-    });
+export const createVendorHandler = async (req: Request, res: Response) => {
+  try {
+    const vendor = await createVendor(req.body);
+    return res.status(201).json({ success: true, data: vendor });
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({ success: false, message: "Failed to create vendor" });
+  }
+};
+
+export const updateVendorHandler = async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    const vendor = await updateVendor(id, req.body);
+    return res.json({ success: true, data: vendor });
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({ success: false, message: "Failed to update vendor" });
+  }
+};
+
+export const deleteVendorHandler = async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    await deleteVendor(id);
+    return res.json({ success: true });
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({ success: false, message: "Failed to delete vendor" });
+  }
+};
+
+export const updateIngredientPriceHandler = async (req: Request, res: Response) => {
+  try {
+    const data = await updateIngredientPrice(req.body);
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({ success: false, message: "Failed to update price" });
+  }
+};
+
+export const getIngredientPriceHistoryHandler = async (req: Request, res: Response) => {
+  try {
+    const ingredientId = Number(req.params.ingredientId);
+    const data = await getIngredientPriceHistory(ingredientId);
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({ success: false, message: "Failed to fetch price history" });
   }
 };

@@ -299,3 +299,64 @@ export const fetchVendorsData = async (restaurantId: number, branchId: number) =
     orderBy: { name: "asc" },
   });
 };
+
+export const createVendor = async (data: {
+  restaurantId: number;
+  branchId: number;
+  name: string;
+  address?: string;
+  phone?: string;
+  email?: string;
+}) => {
+  return prisma.vendor.create({ data });
+};
+
+export const updateVendor = async (
+  id: number,
+  data: { name?: string; address?: string; phone?: string; email?: string },
+) => {
+  return prisma.vendor.update({ where: { id }, data });
+};
+
+export const deleteVendor = async (id: number) => {
+  await prisma.ingredientVendor.deleteMany({ where: { vendorId: id } });
+  return prisma.vendor.delete({ where: { id } });
+};
+
+// ── Ingredient price history ──────────────────────────────────────────────────
+
+export const updateIngredientPrice = async (data: {
+  ingredientId: number;
+  restaurantId: number;
+  newPrice: number;
+  changedById?: number;
+}) => {
+  const ingredient = await prisma.ingredient.findUnique({
+    where: { id: data.ingredientId },
+    select: { pricePerUnit: true },
+  });
+
+  await prisma.ingredientPriceHistory.create({
+    data: {
+      ingredientId: data.ingredientId,
+      restaurantId: data.restaurantId,
+      oldPrice:     ingredient?.pricePerUnit ?? null,
+      newPrice:     data.newPrice,
+      changedById:  data.changedById,
+    },
+  });
+
+  return prisma.ingredient.update({
+    where: { id: data.ingredientId },
+    data:  { pricePerUnit: data.newPrice },
+  });
+};
+
+export const getIngredientPriceHistory = async (
+  ingredientId: number,
+) => {
+  return prisma.ingredientPriceHistory.findMany({
+    where:   { ingredientId },
+    orderBy: { createdAt: "desc" },
+  });
+};

@@ -18,30 +18,82 @@ export const createBillService = async (data: any) => {
       })
     : null;
 
-  const bill = await prisma.bill.create({
-    data: {
-      billNo: `BILL-${Date.now()}`,
-      restaurantId,
-      customerId: customer?.id ?? null,
-      branchId,
-      status: "PAID",
-      subtotal: total,
-      gst: 0,
-      discount: 0,
-      total,
-      paymentMethod: paymentMode,
-      orderType,
-      items: {
-        create: items.map((item: any) => ({
-          menuItemId: item.menuItemId,
-          itemName: item?.itemName,
-          quantity: item.quantity,
-          price: item.price,
-          total: item.price * item.quantity,
-        })),
+  const bill = await prisma.$transaction(async (tx) => {
+    const created = await tx.bill.create({
+      data: {
+        billNo: `BILL-${Date.now()}`,
+        restaurantId,
+        customerId: customer?.id ?? null,
+        branchId,
+        status: "PAID",
+        subtotal: total,
+        gst: 0,
+        discount: 0,
+        total,
+        paymentMethod: paymentMode,
+        orderType,
+        items: {
+          create: items.map((item: any) => ({
+            menuItemId: item.menuItemId,
+            itemName: item?.itemName,
+            quantity: item.quantity,
+            price: item.price,
+            total: item.price * item.quantity,
+          })),
+        },
       },
-    },
-    include: { customer: true, items: true },
+      include: { customer: true, items: true },
+    });
+
+    // ── Auto-deduct ingredients ───────────────────────────────────────────────
+    const menuItemIds = items
+      .filter((item: any) => item.menuItemId)
+      .map((item: any) => item.menuItemId as number);
+
+    if (menuItemIds.length > 0) {
+      const mappings = await tx.menuItemIngredient.findMany({
+        where: { menuItemId: { in: menuItemIds } },
+      });
+
+      if (mappings.length > 0) {
+        const soldQtyMap = new Map<number, number>();
+        for (const item of items as any[]) {
+          if (item.menuItemId) {
+            soldQtyMap.set(item.menuItemId, (soldQtyMap.get(item.menuItemId) ?? 0) + item.quantity);
+          }
+        }
+
+        const ingredientDeductions = new Map<number, number>();
+        for (const mapping of mappings) {
+          const soldQty = soldQtyMap.get(mapping.menuItemId) ?? 0;
+          ingredientDeductions.set(
+            mapping.ingredientId,
+            (ingredientDeductions.get(mapping.ingredientId) ?? 0) + mapping.quantity * soldQty,
+          );
+        }
+
+        await Promise.all([
+          ...Array.from(ingredientDeductions.entries()).map(([ingredientId, qty]) =>
+            tx.ingredient.update({
+              where: { id: ingredientId },
+              data: { quantity: { decrement: qty } },
+            }),
+          ),
+          tx.inventoryAdjustment.createMany({
+            data: Array.from(ingredientDeductions.entries()).map(([ingredientId, qty]) => ({
+              restaurantId,
+              branchId,
+              ingredientId,
+              quantity: qty,
+              adjustmentType: "SALE_DEDUCTION",
+              reason: `Auto-deducted: bill ${created.billNo}`,
+            })),
+          }),
+        ]);
+      }
+    }
+
+    return created;
   });
 
   invalidateDashboardCache(restaurantId);

@@ -72,23 +72,51 @@ export const closeCashSessionService = async (
   data: {
     closedById: number;
     actualCash: number;
-    expectedCash: number;
     closingCash: number;
     notes?: string;
+    expectedCash?: number;
   },
 ) => {
-  const cashDifference = data.actualCash - data.expectedCash;
+  const session = await prisma.dailyCashSession.findUnique({
+    where: { id: sessionId },
+    select: { openingCash: true, businessDate: true, branchId: true },
+  });
+
+  if (!session) throw new Error("Session not found");
+
+  // Auto-calculate expected cash: opening + all CASH bill totals on that business day
+  let expectedCash = data.expectedCash;
+  if (expectedCash === undefined || expectedCash === null) {
+    const dayStart = new Date(session.businessDate);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(session.businessDate);
+    dayEnd.setHours(23, 59, 59, 999);
+
+    const cashBills = await prisma.bill.aggregate({
+      where: {
+        branchId: session.branchId,
+        paymentMethod: { in: ["CASH", "cash"] },
+        createdAt: { gte: dayStart, lte: dayEnd },
+      },
+      _sum: { total: true },
+    });
+
+    expectedCash = session.openingCash + (cashBills._sum.total ?? 0);
+  }
+
+  const cashDifference = data.actualCash - expectedCash;
+
   return prisma.dailyCashSession.update({
     where: { id: sessionId },
     data: {
-      closedById: data.closedById,
-      actualCash: data.actualCash,
-      expectedCash: data.expectedCash,
-      closingCash: data.closingCash,
+      closedById:    data.closedById,
+      actualCash:    data.actualCash,
+      expectedCash,
+      closingCash:   data.closingCash,
       cashDifference,
-      notes: data.notes,
-      status: "CLOSED",
-      closedAt: new Date(),
+      notes:         data.notes,
+      status:        "CLOSED",
+      closedAt:      new Date(),
     },
   });
 };

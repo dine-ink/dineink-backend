@@ -13,6 +13,7 @@ import reportsRoutes from "../modules/reports/reports.routes";
 import cashRoutes from "../modules/cash/cash.routes";
 import attendanceRoutes from "../modules/attendance/attendance.routes";
 import ordersRoutes from "../modules/orders/orders.routes";
+import vendorRoutes from "../modules/vendors/vendor.routes";
 
 const router = express.Router();
 
@@ -30,5 +31,6 @@ router.use("/reports", reportsRoutes);
 router.use("/cash", cashRoutes);
 router.use("/attendance", attendanceRoutes);
 router.use("/orders", ordersRoutes);
+router.use("/vendors", vendorRoutes);
 
 export default router;

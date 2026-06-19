@@ -265,6 +265,60 @@ export const closeRunningOrderService = async (data: any) => {
       where: { id: { in: runningOrders.map((o) => o.id) } },
     });
 
+    // ── Auto-deduct ingredients based on MenuItemIngredient mappings ──────────
+    const menuItemIds = allItems
+      .filter((item: any) => item.menuItemId)
+      .map((item: any) => item.menuItemId as number);
+
+    if (menuItemIds.length > 0) {
+      const mappings = await tx.menuItemIngredient.findMany({
+        where: { menuItemId: { in: menuItemIds } },
+      });
+
+      if (mappings.length > 0) {
+        // Sum quantity sold per menuItem
+        const soldQtyMap = new Map<number, number>();
+        for (const item of allItems as any[]) {
+          if (item.menuItemId) {
+            soldQtyMap.set(item.menuItemId, (soldQtyMap.get(item.menuItemId) ?? 0) + item.quantity);
+          }
+        }
+
+        // Accumulate total deduction per ingredient
+        const ingredientDeductions = new Map<number, number>();
+        for (const mapping of mappings) {
+          const soldQty = soldQtyMap.get(mapping.menuItemId) ?? 0;
+          const deductQty = mapping.quantity * soldQty;
+          ingredientDeductions.set(
+            mapping.ingredientId,
+            (ingredientDeductions.get(mapping.ingredientId) ?? 0) + deductQty,
+          );
+        }
+
+        await Promise.all([
+          // Decrement ingredient stock
+          ...Array.from(ingredientDeductions.entries()).map(([ingredientId, qty]) =>
+            tx.ingredient.update({
+              where: { id: ingredientId },
+              data: { quantity: { decrement: qty } },
+            }),
+          ),
+          // Log adjustment records
+          tx.inventoryAdjustment.createMany({
+            data: Array.from(ingredientDeductions.entries()).map(([ingredientId, qty]) => ({
+              restaurantId: primary.restaurantId,
+              branchId:     primary.branchId,
+              ingredientId,
+              quantity:     qty,
+              adjustmentType: "SALE_DEDUCTION",
+              reason:       `Auto-deducted: bill ${created.billNo}`,
+              updatedById:  primary.createdById ?? null,
+            })),
+          }),
+        ]);
+      }
+    }
+
     return created;
   });
 
