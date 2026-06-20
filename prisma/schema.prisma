@@ -1,3 +1,4 @@
+// Schema updated - run: npx prisma migrate dev
 generator client {
   provider = "prisma-client-js"
   output   = "../generated/prisma"
@@ -240,6 +241,8 @@ model BillItem {
   createdAt  DateTime @default(now())
 
   bill Bill @relation(fields: [billId], references: [id])
+
+  @@index([billId])
 }
 
 model RestaurantTable {
@@ -258,6 +261,9 @@ model RestaurantTable {
   runningOrders RunningOrder[]
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
+
+  @@index([branchId])
+  @@index([restaurantId])
 }
 
 model RunningOrder {
@@ -287,10 +293,7 @@ model RunningOrder {
   sgst Float? @default(0)
 
   finalAmount Float? @default(0)
-  // ORDER FLOW STATUS
-  orderStatus String @default("ACTIVE")
-
-  // INTERNAL STATUS
+  // Billing lifecycle: "ACTIVE" while the table is ordering, "CLOSED" once billed.
   status String @default("ACTIVE")
 
   // KITCHEN STATUS
@@ -353,8 +356,9 @@ model Order {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  branch     Branch     @relation(fields: [branchId], references: [id])
-  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch      @relation(fields: [branchId], references: [id])
+  restaurant Restaurant  @relation(fields: [restaurantId], references: [id])
+  items      OrderItem[]
 
   @@index([restaurantId])
   @@index([branchId])
@@ -369,6 +373,8 @@ model OrderItem {
   price      Float
   total      Float
   createdAt  DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id])
 }
 
 model IngredientCategory {
@@ -634,6 +640,7 @@ model Attendance {
 
   breaks AttendanceBreak[]
 
+  @@unique([userId, date])
   @@index([userId])
   @@index([branchId])
   @@index([date])
@@ -692,6 +699,7 @@ model DailyCashSession {
   restaurant Restaurant @relation(fields: [restaurantId], references: [id])
   branch     Branch     @relation(fields: [branchId], references: [id])
 
+  @@unique([restaurantId, branchId, businessDate])
   @@index([restaurantId])
   @@index([branchId])
 }

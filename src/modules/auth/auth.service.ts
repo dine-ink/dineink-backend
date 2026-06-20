@@ -116,15 +116,23 @@ export const signupUser = async ({
     throw new Error("Password must be at least 6 characters");
   }
   const hashedPassword = await bcrypt.hash(password, 10);
-  const user = await prisma.user.create({
-    data: {
-      name,
-      email,
-      phone,
-      password: hashedPassword,
-      role: "OWNER",
-    },
-  });
+  let user;
+  try {
+    user = await prisma.user.create({
+      data: {
+        name,
+        email,
+        phone,
+        password: hashedPassword,
+        role: "OWNER",
+      },
+    });
+  } catch (error: any) {
+    if (error.code === "P2002") {
+      throw new Error("User with this email or phone already exists");
+    }
+    throw error;
+  }
 
   const token = generateToken({
     id: user.id,
@@ -157,6 +165,9 @@ export const changePasswordService = async (
   const isValid = await bcrypt.compare(currentPassword, user.password);
   if (!isValid) {
     throw new Error("Current password is incorrect");
+  }
+  if (newPassword.length < 6) {
+    throw new Error("Password must be at least 6 characters");
   }
   const hashedPassword = await bcrypt.hash(newPassword, 10);
   await prisma.user.update({

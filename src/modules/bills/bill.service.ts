@@ -2,7 +2,7 @@ import prisma from "../../config/prisma";
 import { invalidateDashboardCache } from "../analytics/analytics.service";
 
 export const createBillService = async (data: any) => {
-  const { customerName, customerPhone, branchId, total, paymentMode, orderType, items, restaurantId } = data;
+  const { customerName, customerPhone, branchId, total, paymentMethod, orderType, items, restaurantId, cgst, sgst, serviceCharge, packingCharge, discount } = data;
 
   // Parallel: customer lookup and bill creation don't depend on branch query
   // branchData was only used for restaurantId — which is already in the payload
@@ -28,9 +28,13 @@ export const createBillService = async (data: any) => {
         status: "PAID",
         subtotal: total,
         gst: 0,
-        discount: 0,
+        cgst: cgst ?? 0,
+        sgst: sgst ?? 0,
+        serviceCharge: serviceCharge ?? 0,
+        packingCharge: packingCharge ?? 0,
+        discount: discount ?? 0,
         total,
-        paymentMethod: paymentMode,
+        paymentMethod,
         orderType,
         items: {
           create: items.map((item: any) => ({
@@ -218,7 +222,7 @@ export const getReportBillsService = async (
       ? {
           createdAt: {
             gte: new Date(from),
-            lte: new Date(to + "T23:59:59.999Z"),
+            lte: new Date(new Date(to).setHours(23, 59, 59, 999)),
           },
         }
       : {};

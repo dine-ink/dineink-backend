@@ -4,7 +4,7 @@ const toNum = (v: any) => Number(v) || 0;
 
 const buildDateFilter = (from?: string, to?: string) =>
   from && to
-    ? { createdAt: { gte: new Date(from), lte: new Date(to + "T23:59:59.999Z") } }
+    ? { createdAt: { gte: new Date(from), lte: new Date(new Date(to).setHours(23, 59, 59, 999)) } }
     : {};
 
 const HOUR_LABEL = (h: number) =>
@@ -296,13 +296,13 @@ export const getStaffProductivityService = async (
   to?: string,
 ) => {
   const dateRange = from && to
-    ? { date: { gte: new Date(from), lte: new Date(to + "T23:59:59.999Z") } }
+    ? { date: { gte: new Date(from), lte: new Date(new Date(to).setHours(23, 59, 59, 999)) } }
     : {};
   const branchFilter = branchId ? { branchId } : {};
 
   const [staff, bills] = await Promise.all([
     prisma.user.findMany({
-      where: { restaurantId, ...branchFilter, isDeleted: false },
+      where: { restaurantId, isDeleted: false },
       select: {
         id: true, name: true, role: true, department: true, salary: true, shift: true,
         attendances: {
@@ -404,7 +404,7 @@ export const getRevenueForecastService = async (
   // Group by date
   const byDate: Record<string, number> = {};
   bills.forEach((b) => {
-    const key = new Date(b.createdAt).toLocaleDateString("en-IN");
+    const key = new Date(b.createdAt).toISOString().slice(0, 10);
     byDate[key] = (byDate[key] || 0) + b.total;
   });
 
@@ -413,7 +413,7 @@ export const getRevenueForecastService = async (
   for (let i = 29; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    const key = d.toLocaleDateString("en-IN");
+    const key = d.toISOString().slice(0, 10);
     history.push({ date: key, revenue: Math.round(byDate[key] || 0) });
   }
 
@@ -435,7 +435,7 @@ export const getRevenueForecastService = async (
     d.setDate(d.getDate() + i);
     const predicted = Math.round(avg7 * Math.pow(growthFactor, i / 7));
     forecast.push({
-      date: d.toLocaleDateString("en-IN"),
+      date: d.toISOString().slice(0, 10),
       predicted,
       lower: Math.round(predicted * 0.85),
       upper: Math.round(predicted * 1.15),

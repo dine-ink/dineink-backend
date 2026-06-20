@@ -400,6 +400,9 @@ export const createRestaurantTableService = async (body: any) => {
 };
 
 export const createStaffService = async (data: any) => {
+  if (data.hasLogin && (!data.password || data.password.length < 6)) {
+    throw new Error("Password must be at least 6 characters for staff with login access");
+  }
   const hashedPassword = await bcrypt.hash(data.password || "1234", 10);
   return prisma.user.create({
     data: {
@@ -440,7 +443,7 @@ export const deleteRestaurantTableService = async (id: number) => {
   // Check table existence + active order in parallel
   const [table, activeOrder] = await Promise.all([
     prisma.restaurantTable.findUnique({ where: { id } }),
-    prisma.runningOrder.findFirst({ where: { tableId: id, status: "RUNNING" } }),
+    prisma.runningOrder.findFirst({ where: { tableId: id, status: "ACTIVE" } }),
   ]);
 
   if (!table) throw new Error("Table not found");

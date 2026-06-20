@@ -24,7 +24,6 @@ export const saveRunningOrderService = async (data: any) => {
         customerName,
         customerPhone,
         paymentMethod,
-        orderStatus: "ACTIVE",
         status: "ACTIVE",
         kitchenStatus: "PENDING",
         totalAmount: batchTotal,
@@ -189,14 +188,16 @@ export const closeRunningOrderService = async (data: any) => {
   const primary = runningOrders[0];
   const allItems = runningOrders.flatMap((o) =>
     o.batches.flatMap((b: any) => b.items),
-  );
+  ).filter((item: any) => item.status !== "CANCELLED");
   const computedTotal = runningOrders.reduce(
     (sum, o) => sum + (o.totalAmount ?? 0), 0,
   );
 
-  const [customer] = await Promise.all([
-    customerPhone
-      ? prisma.customer.upsert({
+  const bill = await prisma.$transaction(async (tx) => {
+    // Upsert customer and free the table inside the transaction so these
+    // changes are rolled back automatically if bill creation fails.
+    const customer = customerPhone
+      ? await tx.customer.upsert({
           where: { phone: customerPhone },
           update: {},
           create: {
@@ -205,29 +206,28 @@ export const closeRunningOrderService = async (data: any) => {
             restaurant: { connect: { id: primary.restaurantId } },
           },
         })
-      : Promise.resolve(null),
-    tableId
-      ? prisma.restaurantTable.updateMany({
-          where: {
-            id: tableId,
-            restaurantId: primary.restaurantId,
-            branchId: primary.branchId,
-          },
-          data: { status: "AVAILABLE" },
-        })
-      : primary.tableId
-        ? prisma.restaurantTable.updateMany({
-            where: {
-              id: primary.tableId,
-              restaurantId: primary.restaurantId,
-              branchId: primary.branchId,
-            },
-            data: { status: "AVAILABLE" },
-          })
-        : Promise.resolve(null),
-  ]);
+      : null;
 
-  const bill = await prisma.$transaction(async (tx) => {
+    if (tableId) {
+      await tx.restaurantTable.updateMany({
+        where: {
+          id: tableId,
+          restaurantId: primary.restaurantId,
+          branchId: primary.branchId,
+        },
+        data: { status: "AVAILABLE" },
+      });
+    } else if (primary.tableId) {
+      await tx.restaurantTable.updateMany({
+        where: {
+          id: primary.tableId,
+          restaurantId: primary.restaurantId,
+          branchId: primary.branchId,
+        },
+        data: { status: "AVAILABLE" },
+      });
+    }
+
     const created = await tx.bill.create({
       data: {
         billNo: `BILL-${Date.now()}`,
@@ -260,9 +260,10 @@ export const closeRunningOrderService = async (data: any) => {
       include: { customer: true, items: true },
     });
 
-    // Delete all resolved running orders (cascade removes batches + items)
-    await tx.runningOrder.deleteMany({
+    // Mark all resolved running orders as CLOSED (preserves history)
+    await tx.runningOrder.updateMany({
       where: { id: { in: runningOrders.map((o) => o.id) } },
+      data: { status: "CLOSED" },
     });
 
     // ── Auto-deduct ingredients based on MenuItemIngredient mappings ──────────

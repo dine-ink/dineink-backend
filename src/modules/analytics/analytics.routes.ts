@@ -18,12 +18,12 @@ import { authMiddleware } from "../../middleware/auth";
 
 const router = Router();
 
-router.get("/:restaurantId/restaurantDashboardOverview", getRestaurantDashboardOverview);
-router.get("/:restaurantId/:branchId/branchDashboardOverview", getBranchDashboardOverview);
-router.post("/insights", saveRestaurantInsights);
-router.get("/insights/:restaurantId/:branchId", getBranchInsights);
-router.get("/:restaurantId/getRestaurantInsights", getRestaurantInsights);
-router.get("/dashboardOverview", getDashboardOverview);
+router.get("/:restaurantId/restaurantDashboardOverview", authMiddleware, getRestaurantDashboardOverview);
+router.get("/:restaurantId/:branchId/branchDashboardOverview", authMiddleware, getBranchDashboardOverview);
+router.post("/insights", authMiddleware, saveRestaurantInsights);
+router.get("/insights/:restaurantId/:branchId", authMiddleware, getBranchInsights);
+router.get("/:restaurantId/getRestaurantInsights", authMiddleware, getRestaurantInsights);
+router.get("/dashboardOverview", authMiddleware, getDashboardOverview);
 
 // Branch & City comparison analytics
 router.get("/:restaurantId/branch-comparison", authMiddleware, getBranchComparison);

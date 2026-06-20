@@ -4,8 +4,8 @@ import { authMiddleware } from "../../middleware/auth";
 
 const router = Router();
 
-router.post("/create", createBill);
-router.get("/:restaurantId/:branchId/branchwise", getBranchWiseBills);
+router.post("/create", authMiddleware, createBill);
+router.get("/:restaurantId/:branchId/branchwise", authMiddleware, getBranchWiseBills);
 // Raw bills with all financial fields — supports ?branchId= ?from= ?to=
 router.get("/:restaurantId/restaurantwise", authMiddleware, getReportBills);
 

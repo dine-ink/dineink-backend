@@ -118,7 +118,7 @@ function aggregateBills(bills: any[]) {
       itemMap[item.itemName] = (itemMap[item.itemName] || 0) + item.quantity;
     }
 
-    const date = new Date(bill.createdAt).toLocaleDateString("en-IN");
+    const date = new Date(bill.createdAt).toISOString().slice(0, 10);
     revenueByDate[date] = (revenueByDate[date] || 0) + bill.total;
     ordersByDate[date] = (ordersByDate[date] || 0) + 1;
   }
@@ -178,6 +178,7 @@ export const getDashboardOverviewService = async (
       where: {
         restaurantId,
         ...branchFilter,
+        status: "PAID",
         createdAt: { gte: startDate, lte: endDate },
       },
       select: billSelect,
@@ -254,11 +255,11 @@ export const getRestaurantInsightsData = async (restaurantId: number) => {
 
 // ─── getDashboardOverviewDataService (owner/admin view — no restaurant filter) ─
 export const getDashboardOverviewDataService = async (range = "today") => {
-  const { startDate } = getDateRange(range);
+  const { startDate, endDate } = getDateRange(range);
 
   const [bills, occupiedTables, branches] = await Promise.all([
     prisma.bill.findMany({
-      where: { createdAt: { gte: startDate } },
+      where: { status: "PAID", createdAt: { gte: startDate, lte: endDate } },
       select: billSelect,
       orderBy: { createdAt: "desc" },
     }),
