@@ -9,10 +9,9 @@ import routes from "./routes";
 const app = express();
 
 app.use(cors({
-  origin: [
-    process.env.OWNER_WEB_URL || "http://localhost:5173",
-    process.env.POS_URL || "http://localhost:5174",
-  ],
+  origin: (origin, callback) => {
+    callback(null, true);
+  },
   credentials: true,
 }));
 
