@@ -134,7 +134,7 @@ function formatBillsAndOrders(bills: any[], runningOrders: any[]) {
       customerPhone: order.customerPhone || "",
       paymentMethod: order.paymentMethod || "-",
       paymentStatus: "-",
-      orderStatus: order.orderStatus,
+      orderStatus: order.kitchenStatus,
       total: allItems.reduce((acc: number, item: any) => acc + item.total, 0),
       table: order.table?.name || "-",
       items: allItems,
@@ -184,7 +184,7 @@ export const getBillsService = async (
         customerName: true,
         customerPhone: true,
         paymentMethod: true,
-        orderStatus: true,
+        kitchenStatus: true,
         createdAt: true,
         table: { select: { name: true } },
         batches: {

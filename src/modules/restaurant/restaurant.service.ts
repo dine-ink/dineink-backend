@@ -376,8 +376,8 @@ export const createRestaurantTableService = async (body: any) => {
       isTemporary: body.isTemporary || false,
       tempTableType: body.tempTableType || null,
       parentTableIds: body.parentTableIds || null,
-      restaurantId: body.restaurantId,
-      branchId: body.branchId,
+      restaurantId: Number(body.restaurantId),
+      branch: { connect: { id: Number(body.branchId) } },
     },
   });
 
@@ -406,8 +406,8 @@ export const createStaffService = async (data: any) => {
   const hashedPassword = await bcrypt.hash(data.password || "1234", 10);
   return prisma.user.create({
     data: {
-      restaurantId: Number(data.restaurantId),
-      branchId: data.branchId ? Number(data.branchId) : null,
+      restaurantId: data.restaurantId ? Number(data.restaurantId) : null,
+      branchId:     data.branchId     ? Number(data.branchId)     : null,
       name: data.name,
       email: data.email || null,
       phone: data.phone || null,

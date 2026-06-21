@@ -55,8 +55,8 @@ export const openCashSessionService = async (data: {
 }) => {
   return prisma.dailyCashSession.create({
     data: {
-      branchId: data.branchId,
-      restaurantId: data.restaurantId,
+      restaurant: { connect: { id: data.restaurantId } },
+      branch:     { connect: { id: data.branchId     } },
       openedById: data.openedById,
       openingCash: data.openingCash,
       businessDate: data.businessDate ? new Date(data.businessDate) : new Date(),

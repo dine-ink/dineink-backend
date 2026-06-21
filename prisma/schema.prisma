@@ -100,7 +100,7 @@ model Branch {
 model User {
   id                          Int                   @id @default(autoincrement())
   name                        String
-  email                       String                @unique
+  email                       String?               @unique
   password                    String
   hasLogin                    Boolean               @default(false)
   role                        String
