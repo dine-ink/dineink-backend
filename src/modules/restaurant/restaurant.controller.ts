@@ -38,9 +38,16 @@ export const setupRestaurant = async (req: any, res: Response) => {
   } catch (error: any) {
     console.log(error.stack);
 
+    // Prisma unique constraint = duplicate email/phone
+    const isDuplicate = error.code === "P2002";
+    const field = error.meta?.target?.[0];
+    const message = isDuplicate
+      ? `A user with this ${field || "email or phone"} already exists. Please use a different value.`
+      : error.message;
+
     return res.status(500).json({
       success: false,
-      message: error.message,
+      message,
     });
   }
 };

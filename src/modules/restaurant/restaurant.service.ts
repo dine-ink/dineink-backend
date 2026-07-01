@@ -4,128 +4,139 @@ import prisma from "../../config/prisma";
 export const setupRestaurantService = async (userId: number, body: any) => {
   const { restaurant, branches, staff, categories } = body;
 
-  // Step 1: create restaurant + update owner (owner update depends on restaurantId)
-  const createdRestaurant = await prisma.restaurant.create({
-    data: {
-      name: restaurant.name,
-      phone: restaurant.phone,
-      email: restaurant.email,
-      address: restaurant.address,
-      gstNumber: restaurant.gst,
-      logo: restaurant.logo,
-    },
-  });
+  // Pre-hash passwords before the transaction (CPU-intensive, not a DB call)
+  const staffWithPasswords = await Promise.all(
+    (staff || []).map(async (member: any) => ({
+      ...member,
+      hashedPassword: await bcrypt.hash(member.password || "1234", 10),
+    })),
+  );
 
-  await prisma.user.update({
-    where: { id: userId },
-    data: { restaurantId: createdRestaurant.id },
-  });
+  // Wrap everything in a transaction — if any step fails, all changes roll back
+  return prisma.$transaction(
+    async (tx) => {
+      // Step 1: create restaurant + link to owner
+      const createdRestaurant = await tx.restaurant.create({
+        data: {
+          name: restaurant.name,
+          phone: restaurant.phone,
+          email: restaurant.email,
+          address: restaurant.address,
+          gstNumber: restaurant.gst,
+          logo: restaurant.logo,
+        },
+      });
 
-  // Step 2: branches + categories run in parallel (both only need restaurantId)
-  const [createdBranches] = await Promise.all([
-    Promise.all(
-      (branches || []).map(async (branch: any) => {
-        const createdBranch = await prisma.branch.create({
-          data: {
-            restaurantId: createdRestaurant.id,
-            name: branch.name,
-            address: branch.address,
-            phone: branch.phone,
-            city: branch.city,
-            state: branch.state,
-            pincode: branch.pincode,
-          },
-        });
+      await tx.user.update({
+        where: { id: userId },
+        data: { restaurantId: createdRestaurant.id },
+      });
 
-        // billing settings + tables within this branch run in parallel
-        await Promise.all([
-          branch.billing
-            ? prisma.billingSettings.create({
-                data: {
-                  branchId: createdBranch.id,
-                  billingTypes: branch.billing.billingTypes,
-                  gstPercentage: Number(branch.billing.gstPercentage),
-                  serviceCharge: Number(branch.billing.serviceCharge),
-                  includeGST: branch.billing.includeGST,
-                  enableDiscount: branch.billing.enableDiscount,
-                  enableTips: branch.billing.enableTips,
-                  paymentMethods: branch.billing.paymentMethods,
-                },
-              })
-            : Promise.resolve(null),
-          branch.tables?.length
-            ? prisma.restaurantTable.createMany({
-                data: branch.tables.map((table: any) => ({
+      // Step 2: branches + categories in parallel (both only need restaurantId)
+      const [createdBranches] = await Promise.all([
+        Promise.all(
+          (branches || []).map(async (branch: any) => {
+            const createdBranch = await tx.branch.create({
+              data: {
+                restaurantId: createdRestaurant.id,
+                name: branch.name,
+                address: branch.address,
+                phone: branch.phone,
+                city: branch.city,
+                state: branch.state,
+                pincode: branch.pincode,
+              },
+            });
+
+            await Promise.all([
+              branch.billing
+                ? tx.billingSettings.create({
+                    data: {
+                      branchId: createdBranch.id,
+                      billingTypes: branch.billing.billingTypes,
+                      gstPercentage: Number(branch.billing.gstPercentage),
+                      serviceCharge: Number(branch.billing.serviceCharge),
+                      includeGST: branch.billing.includeGST,
+                      enableDiscount: branch.billing.enableDiscount,
+                      enableTips: branch.billing.enableTips,
+                      paymentMethods: branch.billing.paymentMethods,
+                    },
+                  })
+                : Promise.resolve(null),
+              branch.tables?.length
+                ? tx.restaurantTable.createMany({
+                    data: branch.tables.map((table: any) => ({
+                      restaurantId: createdRestaurant.id,
+                      branchId: createdBranch.id,
+                      name: table.name,
+                      capacity: Number(table.capacity),
+                    })),
+                  })
+                : Promise.resolve(null),
+            ]);
+
+            return createdBranch;
+          }),
+        ),
+
+        Promise.all(
+          (categories || []).map(async (category: any) => {
+            const createdCategory = await tx.category.create({
+              data: {
+                restaurantId: createdRestaurant.id,
+                name: category.name,
+                icon: category.icon,
+              },
+            });
+            if (category.items?.length) {
+              await tx.menuItem.createMany({
+                data: category.items.map((item: any) => ({
                   restaurantId: createdRestaurant.id,
-                  branchId: createdBranch.id,
-                  name: table.name,
-                  capacity: Number(table.capacity),
+                  categoryId: createdCategory.id,
+                  name: item.name,
+                  price: Number(item.price),
+                  type: item.type,
+                  prepTime: item.prepTime ? Number(item.prepTime) : 0,
                 })),
-              })
-            : Promise.resolve(null),
-        ]);
+              });
+            }
+            return createdCategory;
+          }),
+        ),
+      ]);
 
-        return createdBranch;
-      }),
-    ),
+      // Step 3: staff — uses pre-hashed passwords and maps branch index → branch id
+      if (staffWithPasswords.length) {
+        await Promise.all(
+          staffWithPasswords.map(async (member: any) => {
+            const assignedBranch =
+              member.branchId !== undefined ? createdBranches[member.branchId] : null;
+            return tx.user.create({
+              data: {
+                restaurantId: createdRestaurant.id,
+                branchId: assignedBranch?.id || null,
+                name: member.name,
+                email: member.email,
+                phone: member.phone,
+                password: member.hashedPassword,
+                role: member.role,
+                hasLogin: member.hasLogin,
+                salary: member.salary,
+                joiningDate: member.joiningDate ? new Date(member.joiningDate) : null,
+                shift: member.shift,
+                department: member.department,
+                employmentType: member.employmentType,
+                monthlyWorkingHours: member.monthlyWorkingHours,
+              },
+            });
+          }),
+        );
+      }
 
-    // categories run in parallel with branch creation
-    Promise.all(
-      (categories || []).map(async (category: any) => {
-        const createdCategory = await prisma.category.create({
-          data: {
-            restaurantId: createdRestaurant.id,
-            name: category.name,
-            icon: category.icon,
-          },
-        });
-        if (category.items?.length) {
-          await prisma.menuItem.createMany({
-            data: category.items.map((item: any) => ({
-              restaurantId: createdRestaurant.id,
-              categoryId: createdCategory.id,
-              name: item.name,
-              price: Number(item.price),
-              type: item.type,
-              prepTime: item.prepTime ? Number(item.prepTime) : 0,
-            })),
-          });
-        }
-        return createdCategory;
-      }),
-    ),
-  ]);
-
-  // Step 3: staff depends on createdBranches (for branch index mapping)
-  if (staff?.length) {
-    await Promise.all(
-      staff.map(async (member: any) => {
-        const assignedBranch =
-          member.branchId !== undefined ? createdBranches[member.branchId] : null;
-        const hashedPassword = await bcrypt.hash(member.password || "1234", 10);
-        return prisma.user.create({
-          data: {
-            restaurantId: createdRestaurant.id,
-            branchId: assignedBranch?.id || null,
-            name: member.name,
-            email: member.email,
-            phone: member.phone,
-            password: hashedPassword,
-            role: member.role,
-            hasLogin: member.hasLogin,
-            salary: member.salary,
-            joiningDate: member.joiningDate ? new Date(member.joiningDate) : null,
-            shift: member.shift,
-            department: member.department,
-            employmentType: member.employmentType,
-            monthlyWorkingHours: member.monthlyWorkingHours,
-          },
-        });
-      }),
-    );
-  }
-
-  return createdRestaurant;
+      return createdRestaurant;
+    },
+    { timeout: 30000 },
+  );
 };
 
 export const getShopsService = async (userId: number) => {
