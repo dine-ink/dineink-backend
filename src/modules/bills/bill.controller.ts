@@ -4,6 +4,7 @@ import {
   getBillsService,
   getBranchWiseBillsService,
   getReportBillsService,
+  cancelBillService,
 } from "./bill.service";
 
 export const createBill = async (req: Request, res: Response) => {
@@ -63,5 +64,15 @@ export const getBranchWiseBills = async (req: Request, res: Response) => {
       success: false,
       message: error.message,
     });
+  }
+};
+
+export const cancelBill = async (req: Request, res: Response) => {
+  try {
+    const billId = Number(req.params.billId);
+    const bill = await cancelBillService(billId);
+    return res.status(200).json({ success: true, bill });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
   }
 };

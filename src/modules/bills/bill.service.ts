@@ -208,8 +208,25 @@ export const getBranchWiseBillsService = async (restaurantId: number, branchId: 
   return getBillsService(restaurantId, branchId);
 };
 
+// ─── cancelBillService ───────────────────────────────────────────────────────
+
+export const cancelBillService = async (billId: number) => {
+  const bill = await prisma.bill.findUnique({ where: { id: billId } });
+  if (!bill) throw new Error("Bill not found");
+  if (bill.status === "CANCELLED") throw new Error("Bill is already cancelled");
+
+  const updated = await prisma.bill.update({
+    where: { id: billId },
+    data: { status: "CANCELLED" },
+  });
+
+  invalidateDashboardCache(bill.restaurantId);
+  return updated;
+};
+
 // ─── getReportBillsService ───────────────────────────────────────────────────
-// Raw bills with all financial fields — used by the Reports/P&L page
+// Raw bills with all financial fields — used by the Reports/P&L page.
+// Excludes CANCELLED bills so they don't inflate revenue figures.
 
 export const getReportBillsService = async (
   restaurantId: number,
@@ -232,6 +249,7 @@ export const getReportBillsService = async (
       restaurantId,
       ...(branchId ? { branchId } : {}),
       ...dateFilter,
+      status: { not: "CANCELLED" },
     },
     select: {
       id: true,

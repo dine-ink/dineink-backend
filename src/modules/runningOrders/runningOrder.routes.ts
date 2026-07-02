@@ -8,6 +8,9 @@ import {
   requestItemCancel,
   approveItemCancel,
   rejectItemCancel,
+  holdRunningOrder,
+  resumeRunningOrder,
+  discardRunningOrder,
 } from "./runningOrder.controller";
 
 const router = Router();
@@ -17,6 +20,11 @@ router.get("/:tableId/runningOrdertable", getRunningOrderByTable);
 router.post("/closeRunningOrder", closeRunningOrder);
 router.get("/:restaurantId/:branchId/allRunningOrders", getAllRunningOrders);
 router.patch("/:orderId/updateStatus", updateRunningOrderStatus);
+
+// Hold / resume / discard a running order
+router.patch("/:orderId/hold", holdRunningOrder);
+router.patch("/:orderId/resume", resumeRunningOrder);
+router.delete("/:orderId/discard", discardRunningOrder);
 
 // Item-level cancel request flow
 router.patch("/items/:itemId/request-cancel", requestItemCancel);

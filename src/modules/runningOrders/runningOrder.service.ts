@@ -158,6 +158,45 @@ export const updateRunningOrderStatusService = async (
   });
 };
 
+export const holdRunningOrderService = async (orderId: number) => {
+  const order = await prisma.runningOrder.findUnique({ where: { id: orderId } });
+  if (!order) throw new Error("Running order not found");
+  if (order.status !== "ACTIVE") throw new Error("Only ACTIVE orders can be held");
+  return prisma.runningOrder.update({ where: { id: orderId }, data: { status: "HELD" } });
+};
+
+export const resumeRunningOrderService = async (orderId: number) => {
+  const order = await prisma.runningOrder.findUnique({ where: { id: orderId } });
+  if (!order) throw new Error("Running order not found");
+  if (order.status !== "HELD") throw new Error("Only HELD orders can be resumed");
+  return prisma.runningOrder.update({ where: { id: orderId }, data: { status: "ACTIVE" } });
+};
+
+export const discardRunningOrderService = async (orderId: number) => {
+  const order = await prisma.runningOrder.findUnique({ where: { id: orderId } });
+  if (!order) throw new Error("Running order not found");
+
+  await prisma.$transaction(async (tx) => {
+    // Cascade deletes batches + items via onDelete: Cascade on the schema
+    await tx.runningOrder.delete({ where: { id: orderId } });
+
+    // Free table only if no other ACTIVE/HELD orders remain on it
+    if (order.tableId) {
+      const remaining = await tx.runningOrder.count({
+        where: { tableId: order.tableId, status: { in: ["ACTIVE", "HELD"] } },
+      });
+      if (remaining === 0) {
+        await tx.restaurantTable.updateMany({
+          where: { id: order.tableId },
+          data: { status: "AVAILABLE" },
+        });
+      }
+    }
+  });
+
+  return { success: true };
+};
+
 // Fix #5 — accept tableId to close ALL active orders for a table at once,
 // or a single runningOrderId for backwards-compat (quick billing).
 export const closeRunningOrderService = async (data: any) => {
