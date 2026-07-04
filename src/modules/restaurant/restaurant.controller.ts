@@ -13,6 +13,13 @@ import {
   deleteRestaurantTableService,
   createStaffService,
   updateStaffService,
+  getCategoriesService,
+  createCategoryService,
+  updateCategoryService,
+  deleteCategoryService,
+  createMenuItemService,
+  updateMenuItemService,
+  deleteMenuItemService,
 } from "./restaurant.service";
 
 export const setupRestaurant = async (req: any, res: Response) => {
@@ -229,5 +236,77 @@ export const updateStaff = async (req: any, res: Response) => {
     return res.status(200).json({ success: true, data: staff });
   } catch (error: any) {
     return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ── Category controllers ─────────────────────────────────────────────────────
+
+export const getCategories = async (req: Request, res: Response) => {
+  try {
+    const restaurantId = Number(req.params.restaurantId);
+    const data = await getCategoriesService(restaurantId);
+    return res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const createCategory = async (req: Request, res: Response) => {
+  try {
+    const data = await createCategoryService(req.body);
+    return res.status(201).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const updateCategory = async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    const data = await updateCategoryService(id, req.body);
+    return res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const deleteCategory = async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    await deleteCategoryService(id);
+    return res.status(200).json({ success: true, message: "Category deleted" });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+// ── MenuItem controllers ─────────────────────────────────────────────────────
+
+export const createMenuItem = async (req: Request, res: Response) => {
+  try {
+    const data = await createMenuItemService(req.body);
+    return res.status(201).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const updateMenuItem = async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    const data = await updateMenuItemService(id, req.body);
+    return res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const deleteMenuItem = async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    await deleteMenuItemService(id);
+    return res.status(200).json({ success: true, message: "Menu item deleted" });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
   }
 };

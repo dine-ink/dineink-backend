@@ -13,6 +13,13 @@ import {
   updateRestaurantLogo,
   createStaff,
   updateStaff,
+  getCategories,
+  createCategory,
+  updateCategory,
+  deleteCategory,
+  createMenuItem,
+  updateMenuItem,
+  deleteMenuItem,
 } from "./restaurant.controller";
 
 import {
@@ -45,5 +52,16 @@ router.get("/settings/:restaurantId", authMiddleware, getRestaurantSettings);
 router.put("/branches/update", authMiddleware, updateBranches);
 router.put("/general/:id", authMiddleware, updateGeneralSettings);
 router.post("/branches/create", authMiddleware, createBranch);
+
+// Category CRUD
+router.get("/categories/:restaurantId", authMiddleware, getCategories);
+router.post("/categories", authMiddleware, createCategory);
+router.put("/categories/:id", authMiddleware, updateCategory);
+router.delete("/categories/:id", authMiddleware, deleteCategory);
+
+// MenuItem CRUD
+router.post("/menu-items", authMiddleware, createMenuItem);
+router.put("/menu-items/:id", authMiddleware, updateMenuItem);
+router.delete("/menu-items/:id", authMiddleware, deleteMenuItem);
 
 export default router;

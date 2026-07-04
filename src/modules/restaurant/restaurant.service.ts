@@ -484,3 +484,69 @@ export const deleteRestaurantTableService = async (id: number) => {
   return true;
 };
 
+// ── Category CRUD ────────────────────────────────────────────────────────────
+
+export const getCategoriesService = async (restaurantId: number) => {
+  return prisma.category.findMany({
+    where: { restaurantId, isDeleted: false },
+    orderBy: { createdAt: "asc" },
+  });
+};
+
+export const createCategoryService = async (data: { restaurantId: number; name: string; icon?: string }) => {
+  return prisma.category.create({
+    data: { restaurantId: data.restaurantId, name: data.name, icon: data.icon || null },
+  });
+};
+
+export const updateCategoryService = async (id: number, data: { name?: string; icon?: string }) => {
+  return prisma.category.update({
+    where: { id },
+    data: { name: data.name, icon: data.icon },
+  });
+};
+
+export const deleteCategoryService = async (id: number) => {
+  return prisma.category.update({ where: { id }, data: { isDeleted: true } });
+};
+
+// ── MenuItem CRUD ────────────────────────────────────────────────────────────
+
+export const createMenuItemService = async (data: any) => {
+  return prisma.menuItem.create({
+    data: {
+      restaurantId: data.restaurantId,
+      branchId:     data.branchId     ? Number(data.branchId)     : null,
+      categoryId:   data.categoryId   ? Number(data.categoryId)   : null,
+      name:         data.name,
+      description:  data.description  || null,
+      price:        Number(data.price),
+      type:         data.type         || null,
+      prepTime:     data.prepTime     ? Number(data.prepTime)     : 0,
+      isAvailable:  data.isAvailable  ?? true,
+    },
+    include: { category: true },
+  });
+};
+
+export const updateMenuItemService = async (id: number, data: any) => {
+  const update: any = {};
+  if (data.name       !== undefined) update.name        = data.name;
+  if (data.description !== undefined) update.description = data.description || null;
+  if (data.price      !== undefined) update.price       = Number(data.price);
+  if (data.type       !== undefined) update.type        = data.type;
+  if (data.categoryId !== undefined) update.categoryId  = data.categoryId ? Number(data.categoryId) : null;
+  if (data.prepTime   !== undefined) update.prepTime    = Number(data.prepTime);
+  if (data.isAvailable !== undefined) update.isAvailable = Boolean(data.isAvailable);
+
+  return prisma.menuItem.update({
+    where: { id },
+    data: update,
+    include: { category: true },
+  });
+};
+
+export const deleteMenuItemService = async (id: number) => {
+  return prisma.menuItem.update({ where: { id }, data: { isDeleted: true } });
+};
+
