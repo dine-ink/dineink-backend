@@ -57,6 +57,7 @@ model Restaurant {
   vendorPayments           VendorPayment[]
   vendorInvoices           VendorInvoice[]
   ingredientPriceHistories IngredientPriceHistory[]
+  dailyStockAudits         DailyStockAudit[]
 
   @@index([ownerId])
 }
@@ -93,6 +94,7 @@ model Branch {
   inventoryAdjustments InventoryAdjustment[]
   vendorPayments       VendorPayment[]
   vendorInvoices       VendorInvoice[]
+  dailyStockAudits     DailyStockAudit[]
 
   @@index([restaurantId])
 }
@@ -404,6 +406,7 @@ model Ingredient {
   ingredientVendors    IngredientVendor[]
   inventoryAdjustments InventoryAdjustment[]
   priceHistory         IngredientPriceHistory[]
+  dailyStockAudits     DailyStockAudit[]
 }
 
 model IngredientVendor {
@@ -485,6 +488,14 @@ model RestaurantInsights {
   seasonalImpact         Float?  @default(0)
   weekendSalesIncrease   Float?  @default(0)
   plannedExpansion       String?
+
+  /**
+   * MANUAL FOOD / RAW MATERIAL COST
+   * When set (> 0), overrides the inventory-restock-calculated food cost
+   * in the EBITDA calculation so owners who don't track per-ingredient
+   * purchases can still get accurate P&L figures.
+   */
+  manualFoodCost Float? @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -768,4 +779,29 @@ model InventoryAdjustment {
 
   @@index([restaurantId])
   @@index([branchId])
+}
+
+model DailyStockAudit {
+  id           Int      @id @default(autoincrement())
+  restaurantId Int
+  branchId     Int
+  ingredientId Int
+  auditDate    DateTime // date of the audit (store as midnight UTC for the day)
+  openingQty   Float    // stock at start of day (auto-filled from prev closing or current ingredient qty)
+  sopConsumed  Float    // calculated from orders: Σ(billItem.qty × recipe.qty) for that day
+  closingQty   Float    // actual stock entered by staff at end of day
+  wastage      Float    // (openingQty - sopConsumed) - closingQty
+  notes        String?  // optional staff notes
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch     @relation(fields: [branchId], references: [id])
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id])
+
+  @@unique([branchId, ingredientId, auditDate])
+  @@index([branchId])
+  @@index([restaurantId])
+  @@index([branchId, auditDate])
 }

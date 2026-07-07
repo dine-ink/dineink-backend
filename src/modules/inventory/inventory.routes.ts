@@ -7,6 +7,10 @@ import {
   saveRestockHistory,
   getRestockHistory,
   getAdjustments,
+  getLifecycle,
+  getDailyAuditPreview,
+  saveDailyAudit,
+  getDailyAuditHistory,
 } from "./inventory.controller";
 
 import { authMiddleware } from "../../middleware/auth";
@@ -26,5 +30,13 @@ router.get("/:restaurantId/get-restock-history", authMiddleware, getRestockHisto
 
 // INVENTORY ADJUSTMENTS — GET /api/inventory/adjustments?branchId=&from=&to=
 router.get("/adjustments", authMiddleware, getAdjustments);
+
+// INGREDIENT LIFECYCLE — GET /api/inventory/lifecycle?branchId=&month=&year=
+router.get("/lifecycle", authMiddleware, getLifecycle);
+
+// DAILY STOCK AUDIT
+router.get("/daily-audit/preview", authMiddleware, getDailyAuditPreview);
+router.post("/daily-audit", authMiddleware, saveDailyAudit);
+router.get("/daily-audit/history", authMiddleware, getDailyAuditHistory);
 
 export default router;

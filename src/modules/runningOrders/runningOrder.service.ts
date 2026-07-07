@@ -87,10 +87,17 @@ export const getAllRunningOrdersService = async (
   restaurantId: number,
   branchId: number,
 ) => {
-  // Return ALL active orders — kitchen filters PENDING/PREPARING client-side;
-  // billing page needs READY/DELIVERED too for correct table colours.
+  // Include ACTIVE orders (dine-in) + CLOSED orders whose kitchen hasn't
+  // fulfilled yet (quick-takeaway: billed immediately but still needs preparing).
   const orders = await prisma.runningOrder.findMany({
-    where: { restaurantId, branchId, status: "ACTIVE" },
+    where: {
+      restaurantId,
+      branchId,
+      OR: [
+        { status: "ACTIVE" },
+        { status: "CLOSED", kitchenStatus: { in: ["PENDING", "PREPARING"] } },
+      ],
+    },
     include: {
       batches: { include: { items: true }, orderBy: { createdAt: "asc" } },
       table: { select: { id: true, name: true } },
