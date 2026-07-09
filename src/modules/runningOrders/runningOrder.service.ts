@@ -159,8 +159,7 @@ export const updateRunningOrderStatusService = async (
     where: { id: orderId },
     data: {
       kitchenStatus: status,
-      // Record when kitchen marks the order done so the billing view can show it
-      ...(status === "READY" && { completedAt: new Date() }),
+      ...(status === "READY" && { completedAt: new Date(), status: "CLOSED" }),
     },
   });
 };
@@ -206,12 +205,15 @@ export const discardRunningOrderService = async (orderId: number) => {
 
 // Fix #5 — accept tableId to close ALL active orders for a table at once,
 // or a single runningOrderId for backwards-compat (quick billing).
+// keepOrderActive: true → creates the Bill but does NOT set RunningOrder status=CLOSED,
+// so kitchen still sees the order (used for quick/takeaway where billing is upfront).
 export const closeRunningOrderService = async (data: any) => {
   const {
     runningOrderId, tableId,
     customerName, customerPhone, paymentMethod, orderType, orderStatus,
     subtotal, discountAmount, packingCharge, serviceCharge,
     gstAmount, cgst, sgst, finalAmount,
+    keepOrderActive,
   } = data;
 
   // Resolve which orders to close
@@ -306,11 +308,14 @@ export const closeRunningOrderService = async (data: any) => {
       include: { customer: true, items: true },
     });
 
-    // Mark all resolved running orders as CLOSED (preserves history)
-    await tx.runningOrder.updateMany({
-      where: { id: { in: runningOrders.map((o) => o.id) } },
-      data: { status: "CLOSED" },
-    });
+    // Mark running orders as CLOSED unless keepOrderActive is set
+    // (quick/takeaway bills upfront but kitchen still needs to prepare)
+    if (!keepOrderActive) {
+      await tx.runningOrder.updateMany({
+        where: { id: { in: runningOrders.map((o) => o.id) } },
+        data: { status: "CLOSED" },
+      });
+    }
 
     // ── Auto-deduct ingredients based on MenuItemIngredient mappings ──────────
     const menuItemIds = allItems

@@ -177,7 +177,7 @@ export const getBillsService = async (
       skip: (page - 1) * limit,
     }),
     prisma.runningOrder.findMany({
-      where: { restaurantId, ...branchFilter },
+      where: { restaurantId, ...branchFilter, status: { not: "CLOSED" } },
       select: {
         id: true,
         orderType: true,
