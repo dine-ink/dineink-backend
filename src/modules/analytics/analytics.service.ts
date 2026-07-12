@@ -173,14 +173,16 @@ export const getDashboardOverviewService = async (
   const { startDate, endDate } = getDateRange(range, from, to);
   const branchFilter = branchId ? { branchId } : {};
 
-  const [bills, occupiedTables, branches] = await Promise.all([
+  const billWhere = {
+    restaurantId,
+    ...branchFilter,
+    status: "PAID" as const,
+    createdAt: { gte: startDate, lte: endDate },
+  };
+
+  const [bills, occupiedTables, branches, menuItemsWithCategory] = await Promise.all([
     prisma.bill.findMany({
-      where: {
-        restaurantId,
-        ...branchFilter,
-        status: "PAID",
-        createdAt: { gte: startDate, lte: endDate },
-      },
+      where: billWhere,
       select: billSelect,
       orderBy: { createdAt: "desc" },
     }),
@@ -188,12 +190,39 @@ export const getDashboardOverviewService = async (
       where: { restaurantId, ...branchFilter, status: "OCCUPIED" },
     }),
     prisma.branch.count({ where: { restaurantId } }),
+    prisma.menuItem.findMany({
+      where: { restaurantId, isDeleted: false },
+      select: { name: true, category: { select: { name: true } } },
+    }),
   ]);
+
+  // Build name → category lookup (case-insensitive) from menu items
+  const itemToCategoryMap = new Map<string, string>(
+    menuItemsWithCategory.map((mi) => [
+      mi.name.toLowerCase(),
+      mi.category?.name || "Uncategorized",
+    ]),
+  );
+
+  // Aggregate by category using itemName on BillItem — works even when menuItemId is null
+  const categoryMap: Record<string, number> = {};
+  for (const bill of bills) {
+    for (const item of (bill as any).items || []) {
+      const cat = itemToCategoryMap.get(item.itemName?.toLowerCase()) || "Uncategorized";
+      categoryMap[cat] = (categoryMap[cat] || 0) + item.quantity;
+    }
+  }
+  const topCategories = Object.entries(categoryMap)
+    .filter(([name]) => name !== "Uncategorized")
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([name, quantity]) => ({ name, quantity }));
 
   const aggregated = aggregateBills(bills);
 
   const result = {
     ...aggregated,
+    topCategories,
     occupiedTables,
     branches,
     recentOrders: bills.slice(0, 10),
