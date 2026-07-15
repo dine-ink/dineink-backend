@@ -13,6 +13,15 @@ export const getMenuManagementService = async (
 
       include: {
         category: true,
+        menuItemIngredients: {
+          include: {
+            ingredient: {
+              include: {
+                category: true,
+              },
+            },
+          },
+        },
       },
 
       orderBy: {
@@ -147,7 +156,11 @@ export const getMenuItemMappingData = async (restaurantId: number) => {
 
       menuItemIngredients: {
         include: {
-          ingredient: true,
+          ingredient: {
+            include: {
+              category: true,
+            },
+          },
         },
       },
     },
