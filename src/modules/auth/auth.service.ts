@@ -1,6 +1,12 @@
 import bcrypt from "bcryptjs";
 import prisma from "../../config/prisma";
 import { generateToken } from "../../utils/generateToken/generateToken";
+import { sendOtpEmail } from "../../config/mailer";
+
+const OTP_TTL_MINUTES = 10;
+const MAX_OTP_ATTEMPTS = 5;
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const loginUser = async (identifier: string, password: string) => {
   const user = await prisma.user.findFirst({
@@ -85,7 +91,7 @@ export const loginUser = async (identifier: string, password: string) => {
   };
 };
 
-export const signupUser = async ({
+const createOwnerAccount = async ({
   name,
   email,
   phone,
@@ -146,6 +152,79 @@ export const signupUser = async ({
     token,
     user: safeUser,
   };
+};
+
+// Kept for any existing internal/back-compat callers — creates the account
+// directly with no email verification step.
+export const signupUser = createOwnerAccount;
+
+export const sendSignupOtp = async (email: string) => {
+  if (!email || !EMAIL_REGEX.test(email)) {
+    throw new Error("Enter a valid email address");
+  }
+
+  const existingUser = await prisma.user.findFirst({ where: { email } });
+  if (existingUser) {
+    throw new Error("An account with this email already exists");
+  }
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const otpHash = await bcrypt.hash(otp, 10);
+  const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
+
+  await prisma.emailOtp.upsert({
+    where: { email },
+    update: { otpHash, attempts: 0, expiresAt },
+    create: { email, otpHash, expiresAt },
+  });
+
+  await sendOtpEmail(email, otp);
+
+  return true;
+};
+
+export const verifySignupOtpAndCreateUser = async ({
+  name,
+  email,
+  phone,
+  password,
+  otp,
+}: {
+  name: string;
+  email: string;
+  phone?: string;
+  password: string;
+  otp: string;
+}) => {
+  const record = await prisma.emailOtp.findUnique({ where: { email } });
+
+  if (!record) {
+    throw new Error(
+      "No verification code found for this email — request a new one",
+    );
+  }
+  if (record.expiresAt < new Date()) {
+    await prisma.emailOtp.delete({ where: { email } });
+    throw new Error("Verification code expired — request a new one");
+  }
+  if (record.attempts >= MAX_OTP_ATTEMPTS) {
+    await prisma.emailOtp.delete({ where: { email } });
+    throw new Error("Too many incorrect attempts — request a new code");
+  }
+
+  const isValid = await bcrypt.compare(otp || "", record.otpHash);
+  if (!isValid) {
+    await prisma.emailOtp.update({
+      where: { email },
+      data: { attempts: { increment: 1 } },
+    });
+    throw new Error("Incorrect verification code");
+  }
+
+  // Single-use: consume the OTP before creating the account.
+  await prisma.emailOtp.delete({ where: { email } });
+
+  return createOwnerAccount({ name, email, phone, password });
 };
 
 export const changePasswordService = async (
