@@ -4,7 +4,11 @@ if (process.env.SENDGRID_API_KEY) {
   sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 }
 
-export const sendOtpEmail = async (to: string, otp: string) => {
+const sendCodeEmail = async (
+  to: string,
+  otp: string,
+  { subject, heading, body }: { subject: string; heading: string; body: string },
+) => {
   if (!process.env.SENDGRID_API_KEY || !process.env.SENDGRID_FROM_EMAIL) {
     throw new Error("Email service is not configured");
   }
@@ -12,12 +16,12 @@ export const sendOtpEmail = async (to: string, otp: string) => {
   await sgMail.send({
     to,
     from: process.env.SENDGRID_FROM_EMAIL,
-    subject: "Your DineInk verification code",
-    text: `Your DineInk verification code is ${otp}. It expires in 10 minutes.`,
+    subject,
+    text: `${body} Your code is ${otp}. It expires in 10 minutes.`,
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 420px; margin: 0 auto; padding: 24px;">
-        <h2 style="color:#b10000; margin-bottom: 8px;">Verify your email</h2>
-        <p style="color:#333; font-size: 14px;">Use the code below to finish creating your DineInk account. It expires in 10 minutes.</p>
+        <h2 style="color:#b10000; margin-bottom: 8px;">${heading}</h2>
+        <p style="color:#333; font-size: 14px;">${body} It expires in 10 minutes.</p>
         <div style="font-size: 32px; font-weight: bold; letter-spacing: 8px; background:#f7f4ef; color:#201a17; padding: 16px 24px; border-radius: 8px; text-align:center; margin: 16px 0;">
           ${otp}
         </div>
@@ -26,3 +30,17 @@ export const sendOtpEmail = async (to: string, otp: string) => {
     `,
   });
 };
+
+export const sendOtpEmail = (to: string, otp: string) =>
+  sendCodeEmail(to, otp, {
+    subject: "Your DineInk verification code",
+    heading: "Verify your email",
+    body: "Use the code below to finish creating your DineInk account.",
+  });
+
+export const sendPasswordResetOtpEmail = (to: string, otp: string) =>
+  sendCodeEmail(to, otp, {
+    subject: "Your DineInk password reset code",
+    heading: "Reset your password",
+    body: "Use the code below to reset your DineInk account password.",
+  });

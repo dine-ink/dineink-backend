@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import prisma from "../../config/prisma";
 import { generateToken } from "../../utils/generateToken/generateToken";
-import { sendOtpEmail } from "../../config/mailer";
+import { sendOtpEmail, sendPasswordResetOtpEmail } from "../../config/mailer";
 
 const OTP_TTL_MINUTES = 10;
 const MAX_OTP_ATTEMPTS = 5;
@@ -257,5 +257,86 @@ export const changePasswordService = async (
       password: hashedPassword,
     },
   });
+  return true;
+};
+
+export const sendPasswordResetOtp = async (email: string) => {
+  if (!email || !EMAIL_REGEX.test(email)) {
+    throw new Error("Enter a valid email address");
+  }
+
+  const user = await prisma.user.findFirst({ where: { email } });
+  if (!user || user.isDeleted) {
+    throw new Error("No account found with this email");
+  }
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const otpHash = await bcrypt.hash(otp, 10);
+  const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
+
+  await prisma.passwordResetOtp.upsert({
+    where: { email },
+    update: { otpHash, attempts: 0, expiresAt },
+    create: { email, otpHash, expiresAt },
+  });
+
+  await sendPasswordResetOtpEmail(email, otp);
+
+  return true;
+};
+
+export const verifyPasswordResetOtpAndSetPassword = async ({
+  email,
+  otp,
+  newPassword,
+}: {
+  email: string;
+  otp: string;
+  newPassword: string;
+}) => {
+  const record = await prisma.passwordResetOtp.findUnique({ where: { email } });
+
+  if (!record) {
+    throw new Error(
+      "No verification code found for this email — request a new one",
+    );
+  }
+  if (record.expiresAt < new Date()) {
+    await prisma.passwordResetOtp.delete({ where: { email } });
+    throw new Error("Verification code expired — request a new one");
+  }
+  if (record.attempts >= MAX_OTP_ATTEMPTS) {
+    await prisma.passwordResetOtp.delete({ where: { email } });
+    throw new Error("Too many incorrect attempts — request a new code");
+  }
+
+  const isValid = await bcrypt.compare(otp || "", record.otpHash);
+  if (!isValid) {
+    await prisma.passwordResetOtp.update({
+      where: { email },
+      data: { attempts: { increment: 1 } },
+    });
+    throw new Error("Incorrect verification code");
+  }
+
+  if (!newPassword || newPassword.length < 6) {
+    throw new Error("Password must be at least 6 characters");
+  }
+
+  const user = await prisma.user.findFirst({ where: { email } });
+  if (!user) {
+    await prisma.passwordResetOtp.delete({ where: { email } });
+    throw new Error("No account found with this email");
+  }
+
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { password: hashedPassword },
+  });
+
+  // Single-use: consume the OTP once the password has been changed.
+  await prisma.passwordResetOtp.delete({ where: { email } });
+
   return true;
 };

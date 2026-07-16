@@ -139,6 +139,15 @@ model EmailOtp {
   createdAt DateTime @default(now())
 }
 
+model PasswordResetOtp {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  otpHash   String
+  attempts  Int      @default(0)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
 model Category {
   id           Int        @id @default(autoincrement())
   name         String
