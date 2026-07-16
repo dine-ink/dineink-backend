@@ -11,6 +11,7 @@ import {
   deleteVendorHandler,
   updateIngredientPriceHandler,
   getIngredientPriceHistoryHandler,
+  getIngredientsByVendorHandler,
 } from "./ingredient.controller";
 import { authMiddleware } from "../../middleware/auth";
 
@@ -27,6 +28,7 @@ router.get("/:restaurantId/:branchId/fetchVendors", authMiddleware, getVendors);
 router.post("/vendors", authMiddleware, createVendorHandler);
 router.put("/vendors/:id", authMiddleware, updateVendorHandler);
 router.delete("/vendors/:id", authMiddleware, deleteVendorHandler);
+router.get("/vendors/:vendorId/ingredients", authMiddleware, getIngredientsByVendorHandler);
 
 // Price history
 router.post("/price-update", authMiddleware, updateIngredientPriceHandler);

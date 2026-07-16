@@ -200,7 +200,18 @@ export const getKitchenAnalytics = async (req: Request, res: Response) => {
 export const getHourlyHeatmap = async (req: Request, res: Response) => {
   try {
     const { restaurantId, branchId, from, to } = extractParams(req);
-    const data = await getHourlyHeatmapService(restaurantId, branchId, from, to);
+    const itemId = req.query.itemId ? Number(req.query.itemId) : undefined;
+    const categoryId = req.query.categoryId
+      ? Number(req.query.categoryId)
+      : undefined;
+    const data = await getHourlyHeatmapService(
+      restaurantId,
+      branchId,
+      from,
+      to,
+      itemId,
+      categoryId,
+    );
     return res.status(200).json({ success: true, data });
   } catch (error: any) {
     return res.status(400).json({ success: false, message: error.message });

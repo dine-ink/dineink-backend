@@ -99,12 +99,13 @@ export const saveIngredients = async (
     const quantity = item.quantity !== "" && item.quantity != null ? Number(item.quantity) : null;
     const purchasePrice = item.purchasePrice !== "" && item.purchasePrice != null ? Number(item.purchasePrice) : null;
     const pricePerUnit = item.pricePerUnit !== "" && item.pricePerUnit != null ? Number(item.pricePerUnit) : null;
+    const reorderLevel = item.reorderLevel !== "" && item.reorderLevel != null ? Number(item.reorderLevel) : null;
     const name = item.name.trim();
 
     if (existingMap.has(name)) {
-      toUpdate.push({ id: existingMap.get(name), quantity, unit: item.unit || "Kg", purchasePrice, pricePerUnit, categoryId });
+      toUpdate.push({ id: existingMap.get(name), quantity, unit: item.unit || "Kg", purchasePrice, pricePerUnit, reorderLevel, categoryId });
     } else {
-      toCreate.push({ name, restaurantId, categoryId, quantity, unit: item.unit || "Kg", purchasePrice, pricePerUnit, isAiGenerated: true });
+      toCreate.push({ name, restaurantId, categoryId, quantity, unit: item.unit || "Kg", purchasePrice, pricePerUnit, reorderLevel, isAiGenerated: true });
     }
   }
 
@@ -321,6 +322,24 @@ export const updateVendor = async (
 export const deleteVendor = async (id: number) => {
   await prisma.ingredientVendor.deleteMany({ where: { vendorId: id } });
   return prisma.vendor.delete({ where: { id } });
+};
+
+export const getIngredientsByVendor = async (vendorId: number) => {
+  const rows = await prisma.ingredientVendor.findMany({
+    where: { vendorId },
+    include: { ingredient: { include: { category: true } } },
+  });
+  return rows
+    .filter((r) => r.ingredient)
+    .map((r) => ({
+      id: r.ingredient!.id,
+      name: r.ingredient!.name,
+      category: r.ingredient!.category?.name || "Other",
+      unit: r.ingredient!.unit,
+      purchasePrice: r.ingredient!.purchasePrice,
+      pricePerUnit: r.ingredient!.pricePerUnit,
+      quantity: r.ingredient!.quantity,
+    }));
 };
 
 // ── Ingredient price history ──────────────────────────────────────────────────

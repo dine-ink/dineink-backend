@@ -31,6 +31,7 @@ export const updateBranchesService = async (body: any) => {
         city: branch.city || null,
         state: branch.state || null,
         pincode: branch.pincode || null,
+        closingTime: branch.closingTime || null,
         isDeleted: branch.isDeleted ?? false,
       };
 

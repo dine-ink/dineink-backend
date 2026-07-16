@@ -58,6 +58,7 @@ model Restaurant {
   vendorInvoices           VendorInvoice[]
   ingredientPriceHistories IngredientPriceHistory[]
   dailyStockAudits         DailyStockAudit[]
+  sopChecklists            SopChecklist[]
 
   @@index([ownerId])
 }
@@ -74,6 +75,7 @@ model Branch {
   city                 String?
   state                String?
   pincode              String?
+  closingTime          String? // "HH:mm" 24hr — used for the after-closing daily stock audit reminder
   menuItems            MenuItem[]
   tables               RestaurantTable[]
   isActive             Boolean               @default(true)
@@ -95,6 +97,7 @@ model Branch {
   vendorPayments       VendorPayment[]
   vendorInvoices       VendorInvoice[]
   dailyStockAudits     DailyStockAudit[]
+  sopChecklists        SopChecklist[]
 
   @@index([restaurantId])
 }
@@ -172,6 +175,7 @@ model MenuItem {
   branch              Branch?              @relation(fields: [branchId], references: [id])
   category            Category?            @relation(fields: [categoryId], references: [id])
   menuItemIngredients MenuItemIngredient[]
+  sopChecklists       SopChecklist[]
 
   @@index([restaurantId])
   @@index([branchId])
@@ -397,6 +401,7 @@ model Ingredient {
   unit                 String?
   purchasePrice        Float?
   pricePerUnit         Float?
+  reorderLevel         Float?
   isAiGenerated        Boolean               @default(true)
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
@@ -804,4 +809,25 @@ model DailyStockAudit {
   @@index([branchId])
   @@index([restaurantId])
   @@index([branchId, auditDate])
+}
+
+model SopChecklist {
+  id           Int      @id @default(autoincrement())
+  restaurantId Int
+  branchId     Int?
+  menuItemId   Int?
+  title        String
+  category     String? // e.g. "Prep", "Hygiene", "Portioning"
+  steps        Json // ordered array of step strings
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id])
+  menuItem   MenuItem?  @relation(fields: [menuItemId], references: [id])
+
+  @@index([restaurantId])
+  @@index([branchId])
+  @@index([menuItemId])
 }

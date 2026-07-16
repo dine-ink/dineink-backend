@@ -14,6 +14,7 @@ import cashRoutes from "../modules/cash/cash.routes";
 import attendanceRoutes from "../modules/attendance/attendance.routes";
 import ordersRoutes from "../modules/orders/orders.routes";
 import vendorRoutes from "../modules/vendors/vendor.routes";
+import sopRoutes from "../modules/sop/sop.routes";
 
 const router = express.Router();
 
@@ -32,5 +33,6 @@ router.use("/cash", cashRoutes);
 router.use("/attendance", attendanceRoutes);
 router.use("/orders", ordersRoutes);
 router.use("/vendors", vendorRoutes);
+router.use("/sop", sopRoutes);
 
 export default router;

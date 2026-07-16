@@ -6,6 +6,7 @@ import {
   deleteVendor,
   updateIngredientPrice,
   getIngredientPriceHistory,
+  getIngredientsByVendor,
 } from "./ingredient.service";
 
 export const generateIngredients = async (req: any, res: any) => {
@@ -166,5 +167,16 @@ export const getIngredientPriceHistoryHandler = async (req: Request, res: Respon
   } catch (err) {
     console.log(err);
     return res.status(500).json({ success: false, message: "Failed to fetch price history" });
+  }
+};
+
+export const getIngredientsByVendorHandler = async (req: Request, res: Response) => {
+  try {
+    const vendorId = Number(req.params.vendorId);
+    const data = await getIngredientsByVendor(vendorId);
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({ success: false, message: "Failed to fetch vendor ingredients" });
   }
 };

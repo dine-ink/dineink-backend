@@ -155,14 +155,12 @@ export const getHourlyHeatmapService = async (
   branchId?: number,
   from?: string,
   to?: string,
+  itemId?: number,
+  categoryId?: number,
 ) => {
   const dateFilter = buildDateFilter(from, to);
   const branchFilter = branchId ? { branchId } : {};
-
-  const bills = await prisma.bill.findMany({
-    where: { restaurantId, ...branchFilter, ...dateFilter },
-    select: { total: true, createdAt: true },
-  });
+  const itemFiltered = Boolean(itemId || categoryId);
 
   const byHour: Record<number, { revenue: number; orders: number }> = {};
   const byDay: Record<number, { revenue: number; orders: number }> = {};
@@ -171,24 +169,61 @@ export const getHourlyHeatmapService = async (
   for (let h = 0; h < 24; h++) byHour[h] = { revenue: 0, orders: 0 };
   for (let d = 0; d < 7; d++) byDay[d] = { revenue: 0, orders: 0 };
 
-  bills.forEach((b) => {
-    const d = new Date(b.createdAt);
-    const h = d.getHours();
-    const day = d.getDay();
-    byHour[h].revenue += b.total;
-    byHour[h].orders++;
-    byDay[day].revenue += b.total;
-    byDay[day].orders++;
-    const key = `${day}-${h}`;
-    heatmapRaw[key] = (heatmapRaw[key] || 0) + b.total;
-  });
+  if (itemFiltered) {
+    // Demand for a specific menu item / category, by hour-of-day & day-of-week.
+    // "revenue"/"orders" below represent that item's (or category's) own
+    // quantity sold and line revenue — not the whole bill.
+    const billItems = await prisma.billItem.findMany({
+      where: {
+        bill: { restaurantId, ...branchFilter, ...dateFilter },
+        ...(itemId ? { menuItemId: itemId } : {}),
+        ...(categoryId
+          ? { menuItem: { categoryId } }
+          : {}),
+      },
+      select: {
+        quantity: true,
+        total: true,
+        createdAt: true,
+      },
+    });
+
+    billItems.forEach((bi) => {
+      const d = new Date(bi.createdAt);
+      const h = d.getHours();
+      const day = d.getDay();
+      byHour[h].revenue += bi.total;
+      byHour[h].orders += bi.quantity;
+      byDay[day].revenue += bi.total;
+      byDay[day].orders += bi.quantity;
+      const key = `${day}-${h}`;
+      heatmapRaw[key] = (heatmapRaw[key] || 0) + bi.total;
+    });
+  } else {
+    const bills = await prisma.bill.findMany({
+      where: { restaurantId, ...branchFilter, ...dateFilter },
+      select: { total: true, createdAt: true },
+    });
+
+    bills.forEach((b) => {
+      const d = new Date(b.createdAt);
+      const h = d.getHours();
+      const day = d.getDay();
+      byHour[h].revenue += b.total;
+      byHour[h].orders++;
+      byDay[day].revenue += b.total;
+      byDay[day].orders++;
+      const key = `${day}-${h}`;
+      heatmapRaw[key] = (heatmapRaw[key] || 0) + b.total;
+    });
+  }
 
   const hourlyData = Object.entries(byHour).map(([h, d]) => ({
     hour: Number(h),
     label: HOUR_LABEL(Number(h)),
     revenue: Math.round(d.revenue),
     orders: d.orders,
-    avgBill: d.orders ? Math.round(d.revenue / d.orders) : 0,
+    avgBill: d.orders && !itemFiltered ? Math.round(d.revenue / d.orders) : 0,
   }));
 
   const dailyData = Object.entries(byDay).map(([day, d]) => ({
@@ -197,7 +232,7 @@ export const getHourlyHeatmapService = async (
     short: DAY_NAMES[Number(day)].slice(0, 3),
     revenue: Math.round(d.revenue),
     orders: d.orders,
-    avgBill: d.orders ? Math.round(d.revenue / d.orders) : 0,
+    avgBill: d.orders && !itemFiltered ? Math.round(d.revenue / d.orders) : 0,
   }));
 
   const heatmapGrid = [];
@@ -214,10 +249,25 @@ export const getHourlyHeatmapService = async (
     }
   }
 
-  const peakHour = hourlyData.reduce((b, h) => (h.revenue > b.revenue ? h : b), hourlyData[0]);
-  const peakDay = dailyData.reduce((b, d) => (d.revenue > b.revenue ? d : b), dailyData[0]);
+  // When filtered to an item/category, "high demand" means highest quantity
+  // sold, not revenue (a cheap item sold 50 times is higher demand than an
+  // expensive item sold twice).
+  const peakHour = itemFiltered
+    ? hourlyData.reduce((b, h) => (h.orders > b.orders ? h : b), hourlyData[0])
+    : hourlyData.reduce((b, h) => (h.revenue > b.revenue ? h : b), hourlyData[0]);
+  const peakDay = itemFiltered
+    ? dailyData.reduce((b, d) => (d.orders > b.orders ? d : b), dailyData[0])
+    : dailyData.reduce((b, d) => (d.revenue > b.revenue ? d : b), dailyData[0]);
 
-  return { hourlyData, dailyData, heatmapGrid, peakHour, peakDay };
+  return {
+    hourlyData,
+    dailyData,
+    heatmapGrid,
+    peakHour,
+    peakDay,
+    itemFiltered,
+    demandMetric: itemFiltered ? "quantity" : "revenue",
+  };
 };
 
 // ─── 3. Customer RFM Scoring ──────────────────────────────────────────────────
