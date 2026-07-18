@@ -1,5 +1,6 @@
 import openai from "../../config/openai";
 import prisma from "../../config/prisma";
+import { classifyUnit, toCanonicalQty, toCanonicalPricePerUnit } from "../../utils/units";
 
 export const generateIngredients = async (restaurantId: number) => {
   const menuItems = await prisma.menuItem.findMany({
@@ -96,16 +97,27 @@ export const saveIngredients = async (
 
   for (const { categoryName, item } of allItems) {
     const categoryId = categoryMap.get(categoryName);
-    const quantity = item.quantity !== "" && item.quantity != null ? Number(item.quantity) : null;
+    const rawQuantity = item.quantity !== "" && item.quantity != null ? Number(item.quantity) : null;
     const purchasePrice = item.purchasePrice !== "" && item.purchasePrice != null ? Number(item.purchasePrice) : null;
-    const pricePerUnit = item.pricePerUnit !== "" && item.pricePerUnit != null ? Number(item.pricePerUnit) : null;
-    const reorderLevel = item.reorderLevel !== "" && item.reorderLevel != null ? Number(item.reorderLevel) : null;
+    const rawPricePerUnit = item.pricePerUnit !== "" && item.pricePerUnit != null ? Number(item.pricePerUnit) : null;
+    const rawReorderLevel = item.reorderLevel !== "" && item.reorderLevel != null ? Number(item.reorderLevel) : null;
     const name = item.name.trim();
 
+    // Store everything in the canonical unit (Kg / Litre / Piece) regardless
+    // of which unit the user picked when entering it.
+    const enteredUnit = item.unit || "Kg";
+    const canonicalQty = rawQuantity != null ? toCanonicalQty(rawQuantity, enteredUnit) : null;
+    const unit = canonicalQty?.unit || classifyUnit(enteredUnit)?.canonical || "Kg";
+    const quantity = canonicalQty ? canonicalQty.qty : rawQuantity;
+    const pricePerUnit =
+      rawPricePerUnit != null ? (toCanonicalPricePerUnit(rawPricePerUnit, enteredUnit) ?? rawPricePerUnit) : null;
+    const reorderLevel =
+      rawReorderLevel != null ? (toCanonicalQty(rawReorderLevel, enteredUnit)?.qty ?? rawReorderLevel) : null;
+
     if (existingMap.has(name)) {
-      toUpdate.push({ id: existingMap.get(name), quantity, unit: item.unit || "Kg", purchasePrice, pricePerUnit, reorderLevel, categoryId });
+      toUpdate.push({ id: existingMap.get(name), quantity, unit, purchasePrice, pricePerUnit, reorderLevel, categoryId });
     } else {
-      toCreate.push({ name, restaurantId, categoryId, quantity, unit: item.unit || "Kg", purchasePrice, pricePerUnit, reorderLevel, isAiGenerated: true });
+      toCreate.push({ name, restaurantId, categoryId, quantity, unit, purchasePrice, pricePerUnit, reorderLevel, isAiGenerated: true });
     }
   }
 

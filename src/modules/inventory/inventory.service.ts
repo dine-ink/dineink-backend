@@ -1,8 +1,12 @@
 import prisma from "../../config/prisma";
+import { toCanonicalQty, classifyUnit } from "../../utils/units";
 
 // Converts a recipe quantity (in the recipe's own unit, e.g. "gm") into the
 // ingredient's stock-tracking unit (e.g. "Kg") so wastage/consumption math
 // never mixes grams against kilograms (or ml against litres) unconverted.
+// Since both units are now kept canonical at write time (see saveIngredients
+// and saveMenuItemMappingData), this is normally a no-op — kept as a
+// defense-in-depth safety net for any data that predates that guarantee.
 export const convertQtyToIngredientUnit = (
   qty: number,
   fromUnit?: string | null,
@@ -11,8 +15,8 @@ export const convertQtyToIngredientUnit = (
   const from = (fromUnit || "").toLowerCase();
   const to = (toUnit || "").toLowerCase();
   if (!from || !to || from === to) return qty;
-  if (to === "kg" && (from === "gram" || from === "gm" || from === "g")) return qty / 1000;
-  if (to === "litre" && (from === "ml" || from === "milliliter" || from === "millilitre")) return qty / 1000;
+  const converted = toCanonicalQty(qty, fromUnit);
+  if (converted && converted.unit.toLowerCase() === to) return converted.qty;
   return qty;
 };
 
@@ -144,17 +148,22 @@ export const saveMenuItemMappingData = async (
 
   if (ingredients?.length) {
     await prisma.menuItemIngredient.createMany({
-      data: ingredients.map((item: any) => ({
-        menuItemId,
+      data: ingredients.map((item: any) => {
+        // Recipes can be entered in whatever unit is convenient (e.g. grams)
+        // but are always stored in the canonical unit (Kg/Litre/Piece).
+        const converted = toCanonicalQty(Number(item.quantity), item.unit);
+        return {
+          menuItemId,
 
-        ingredientId: item.ingredientId,
+          ingredientId: item.ingredientId,
 
-        quantity: Number(item.quantity),
+          quantity: converted ? converted.qty : Number(item.quantity),
 
-        unit: item.unit,
+          unit: converted ? converted.unit : item.unit,
 
-        wastage: Number(item.wastage || 0),
-      })),
+          wastage: Number(item.wastage || 0),
+        };
+      }),
     });
   }
 
@@ -183,13 +192,65 @@ export const getMenuItemMappingData = async (restaurantId: number) => {
   });
 };
 
+// Genuine quantity / per-unit-price fields in an uploaded restock row. Money
+// totals (Day N Total, Opening/Closing Value, Week Purchase, Week Inventory
+// Cost, Expense) are deliberately excluded — they're already in ₹, not in
+// the ingredient's unit, so they don't change when the unit is converted.
+const RESTOCK_QTY_FIELDS = [
+  "Opening Qty",
+  "Closing Qty",
+  "Week Inventory",
+  "Day 1 Qty",
+  "Day 2 Qty",
+  "Day 3 Qty",
+  "Day 4 Qty",
+  "Day 5 Qty",
+  "Day 6 Qty",
+  "Day 7 Qty",
+];
+const RESTOCK_PRICE_PER_UNIT_FIELDS = [
+  "Opening Price",
+  "Day 1 Price",
+  "Day 2 Price",
+  "Day 3 Price",
+  "Day 4 Price",
+  "Day 5 Price",
+  "Day 6 Price",
+  "Day 7 Price",
+];
+
+// Normalizes every row of an uploaded restock sheet to the canonical unit,
+// regardless of what unit the sheet's "Unit" column says — so a user who
+// hand-edits the downloaded template to use grams instead of Kg still ends
+// up with correctly-converted, canonical data in the database.
+const normalizeRestockData = (data: any) => {
+  if (!data || typeof data !== "object") return data;
+  const normalized: Record<string, any[]> = {};
+  for (const weekKey of Object.keys(data)) {
+    normalized[weekKey] = (data[weekKey] || []).map((row: any) => {
+      const info = classifyUnit(row?.["Unit"]);
+      if (!info) return row; // unrecognized unit — leave untouched rather than guess
+      const next = { ...row, Unit: info.canonical };
+      for (const f of RESTOCK_QTY_FIELDS) {
+        if (next[f] != null && next[f] !== "") next[f] = Number(next[f]) * info.toCanonical;
+      }
+      for (const f of RESTOCK_PRICE_PER_UNIT_FIELDS) {
+        if (next[f] != null && next[f] !== "") next[f] = Number(next[f]) / info.toCanonical;
+      }
+      return next;
+    });
+  }
+  return normalized;
+};
+
 export const saveRestockHistoryData = async (
   restaurantId: number,
   branchId: number,
   month: number,
   year: number,
-  data: any,
+  rawData: any,
 ) => {
+  const data = normalizeRestockData(rawData);
   return prisma.inventoryRestock.upsert({
     where: {
       restaurantId_branchId_month_year: {
@@ -430,12 +491,27 @@ export const getIngredientLifecycleService = async (
   const ingredientByName = new Map(ingredients.map((i) => [i.name.toLowerCase().trim(), i]));
   const ingredientById = new Map(ingredients.map((i) => [i.id, i]));
 
-  // Parse restock JSON: { week1: [{Ingredient, "Opening Qty", "Week Purchase", "Closing Qty"}...], week2: [...] }
+  // Parse restock JSON: { week1: [{Ingredient, "Opening Qty", "Day N Qty", "Closing Qty"}...], week2: [...] }
   const restockData = restock?.data as Record<string, any[]> | null;
   const restockByName = new Map<
     string,
     { openingQty: number; purchases: number; closingQty: number; unit: string }
   >();
+
+  // "Week Purchase" is a ₹ money total (day price × day qty, summed for the
+  // week) — NOT a purchased quantity — so the actual quantity purchased that
+  // week has to be reconstructed from the day-by-day "Day N Qty" columns.
+  const DAY_QTY_FIELDS = [
+    "Day 1 Qty",
+    "Day 2 Qty",
+    "Day 3 Qty",
+    "Day 4 Qty",
+    "Day 5 Qty",
+    "Day 6 Qty",
+    "Day 7 Qty",
+  ];
+  const weekPurchasedQty = (row: any) =>
+    DAY_QTY_FIELDS.reduce((sum, f) => sum + Number(row[f] || 0), 0);
 
   if (restockData) {
     const weekKeys = Object.keys(restockData).sort();
@@ -454,7 +530,7 @@ export const getIngredientLifecycleService = async (
     for (const wk of weekKeys) {
       for (const row of restockData[wk] || []) {
         const name = String(row["Ingredient"] || "").toLowerCase().trim();
-        if (restockByName.has(name)) restockByName.get(name)!.purchases += Number(row["Week Purchase"] || 0);
+        if (restockByName.has(name)) restockByName.get(name)!.purchases += weekPurchasedQty(row);
       }
     }
     for (const row of restockData[weekKeys[weekKeys.length - 1]] || []) {

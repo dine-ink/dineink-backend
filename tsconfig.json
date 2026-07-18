@@ -17,5 +17,5 @@
     "forceConsistentCasingInFileNames": true
   },
 
-  "exclude": ["prisma.config.ts"]
+  "exclude": ["prisma.config.ts", "scripts"]
 }
