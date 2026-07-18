@@ -251,6 +251,16 @@ export const saveRestaurantInsightsData = async (data: any) => {
   });
 };
 
+// Insights fixed/variable/labour costs are monthly figures (re-entered each
+// month in Insights Setup), so "revenue" here must be scoped to the current
+// calendar month too — an all-time sum would dwarf one month of costs and
+// make EBITDA%/food-cost%/prime-cost% look better the longer the restaurant
+// has been open, regardless of actual performance.
+const currentMonthRange = () => {
+  const now = new Date();
+  return { gte: new Date(now.getFullYear(), now.getMonth(), 1), lte: now };
+};
+
 // ─── getBranchInsightsData ────────────────────────────────────────────────────
 export const getBranchInsightsData = async (
   restaurantId: number,
@@ -262,7 +272,12 @@ export const getBranchInsightsData = async (
     }),
     prisma.bill.aggregate({
       _sum: { total: true },
-      where: { restaurantId, branchId, status: "PAID" },
+      where: {
+        restaurantId,
+        branchId,
+        status: "PAID",
+        createdAt: currentMonthRange(),
+      },
     }),
   ]);
 
@@ -275,7 +290,7 @@ export const getRestaurantInsightsData = async (restaurantId: number) => {
     prisma.restaurantInsights.findMany({ where: { restaurantId } }),
     prisma.bill.aggregate({
       _sum: { total: true },
-      where: { restaurantId, status: "PAID" },
+      where: { restaurantId, status: "PAID", createdAt: currentMonthRange() },
     }),
   ]);
 

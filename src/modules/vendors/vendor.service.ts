@@ -113,12 +113,18 @@ export const getVendorOutstandingService = async (
   return vendors.map((v) => {
     const vendorInvoices = invoices.filter((i) => i.vendorId === v.id);
     const vendorPayments = payments.filter((p) => p.vendorId === v.id);
-    const totalBilled    = vendorInvoices.reduce((s, i) => s + i.totalAmount, 0);
-    const totalPaid      = vendorPayments.reduce((s, p) => s + p.amount, 0);
+    const totalBilled = vendorInvoices.reduce((s, i) => s + i.totalAmount, 0);
+    // Outstanding must reflect paidAmount already recorded against each
+    // invoice (maintained by payVendorInvoiceService) — VendorPayment is a
+    // separate, invoice-unlinked ledger, so summing it instead ignored any
+    // partial payment made via the "pay invoice" flow entirely.
+    const totalPaid = vendorInvoices.reduce((s, i) => s + i.paidAmount, 0);
+    const totalRecordedPayments = vendorPayments.reduce((s, p) => s + p.amount, 0);
     return {
       ...v,
       totalBilled,
       totalPaid,
+      totalRecordedPayments,
       outstanding: Math.max(0, totalBilled - totalPaid),
       pendingInvoices: vendorInvoices.length,
     };

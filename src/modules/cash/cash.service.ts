@@ -96,6 +96,7 @@ export const closeCashSessionService = async (
       where: {
         branchId: session.branchId,
         paymentMethod: { in: ["CASH", "cash"] },
+        status: "PAID",
         createdAt: { gte: dayStart, lte: dayEnd },
       },
       _sum: { total: true },

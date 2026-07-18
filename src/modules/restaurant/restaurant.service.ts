@@ -262,7 +262,7 @@ export const getBranchDetailsService = async (branchId: number) => {
       by: ["itemName"],
       _sum: { quantity: true },
       where: {
-        bill: { branchId, createdAt: { gte: startDate } },
+        bill: { branchId, createdAt: { gte: startDate }, status: "PAID" },
       },
       orderBy: { _sum: { quantity: "desc" } },
       take: 10,

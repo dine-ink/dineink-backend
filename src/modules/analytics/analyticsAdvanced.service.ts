@@ -175,7 +175,7 @@ export const getHourlyHeatmapService = async (
     // quantity sold and line revenue — not the whole bill.
     const billItems = await prisma.billItem.findMany({
       where: {
-        bill: { restaurantId, ...branchFilter, ...dateFilter },
+        bill: { restaurantId, ...branchFilter, ...dateFilter, status: "PAID" },
         ...(itemId ? { menuItemId: itemId } : {}),
         ...(categoryId
           ? { menuItem: { categoryId } }
@@ -201,7 +201,7 @@ export const getHourlyHeatmapService = async (
     });
   } else {
     const bills = await prisma.bill.findMany({
-      where: { restaurantId, ...branchFilter, ...dateFilter },
+      where: { restaurantId, ...branchFilter, ...dateFilter, status: "PAID" },
       select: { total: true, createdAt: true },
     });
 
@@ -368,7 +368,12 @@ export const getStaffProductivityService = async (
       },
     }),
     prisma.bill.findMany({
-      where: { restaurantId, ...branchFilter, ...buildDateFilter(from, to) },
+      where: {
+        restaurantId,
+        ...branchFilter,
+        ...buildDateFilter(from, to),
+        status: "PAID",
+      },
       select: { total: true, createdAt: true },
     }),
     branchId
@@ -496,6 +501,7 @@ export const getRevenueForecastService = async (
       restaurantId,
       ...branchFilter,
       createdAt: { gte: thirtyDaysAgo },
+      status: "PAID",
     },
     select: { total: true, createdAt: true },
     orderBy: { createdAt: "asc" },
