@@ -75,6 +75,7 @@ model Branch {
   city                 String?
   state                String?
   pincode              String?
+  openingTime          String? // "HH:mm" 24hr — used to compute the staff late-arrival cutoff
   closingTime          String? // "HH:mm" 24hr — used for the after-closing daily stock audit reminder
   menuItems            MenuItem[]
   tables               RestaurantTable[]
