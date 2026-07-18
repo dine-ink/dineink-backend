@@ -33,6 +33,10 @@ export const updateBranchesService = async (body: any) => {
         pincode: branch.pincode || null,
         openingTime: branch.openingTime || null,
         closingTime: branch.closingTime || null,
+        morningShiftHours: Number(branch.morningShiftHours) || 6,
+        eveningShiftHours: Number(branch.eveningShiftHours) || 6,
+        fullDayShiftHours: Number(branch.fullDayShiftHours) || 10,
+        overtimeRateMultiplier: Number(branch.overtimeRateMultiplier) || 1.5,
         isDeleted: branch.isDeleted ?? false,
       };
 

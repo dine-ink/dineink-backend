@@ -350,14 +350,20 @@ export const getStaffProductivityService = async (
     : {};
   const branchFilter = branchId ? { branchId } : {};
 
-  const [staff, bills] = await Promise.all([
+  const [staff, bills, branch] = await Promise.all([
     prisma.user.findMany({
       where: { restaurantId, isDeleted: false },
       select: {
         id: true, name: true, role: true, department: true, salary: true, shift: true,
         attendances: {
           where: { ...branchFilter, ...dateRange },
-          select: { totalHours: true, loginTime: true, status: true },
+          select: {
+            totalHours: true,
+            manualTotalHours: true,
+            overtimeHours: true,
+            loginTime: true,
+            status: true,
+          },
         },
       },
     }),
@@ -365,7 +371,34 @@ export const getStaffProductivityService = async (
       where: { restaurantId, ...branchFilter, ...buildDateFilter(from, to) },
       select: { total: true, createdAt: true },
     }),
+    branchId
+      ? prisma.branch.findUnique({
+          where: { id: branchId },
+          select: {
+            morningShiftHours: true,
+            eveningShiftHours: true,
+            fullDayShiftHours: true,
+            overtimeRateMultiplier: true,
+          },
+        })
+      : Promise.resolve(null),
   ]);
+
+  // Standard hours per shift type and the overtime multiplier are owner
+  // configurable per branch (Settings → Branches → Payroll Policy); fall
+  // back to sensible defaults when no branch is selected or unset.
+  const payrollPolicy = {
+    morningShiftHours: branch?.morningShiftHours ?? 6,
+    eveningShiftHours: branch?.eveningShiftHours ?? 6,
+    fullDayShiftHours: branch?.fullDayShiftHours ?? 10,
+    overtimeRateMultiplier: branch?.overtimeRateMultiplier ?? 1.5,
+  };
+  const getStandardShiftHours = (shift?: string | null) => {
+    const s = (shift || "").toUpperCase();
+    if (s === "MORNING") return payrollPolicy.morningShiftHours || 6;
+    if (s === "EVENING") return payrollPolicy.eveningShiftHours || 6;
+    return payrollPolicy.fullDayShiftHours || 10;
+  };
 
   // Revenue bucketed by shift hours
   const shiftRevenue = { morning: 0, afternoon: 0, evening: 0, night: 0 };
@@ -378,12 +411,25 @@ export const getStaffProductivityService = async (
   });
 
   const staffData = staff.map((s) => {
-    const totalHours = toNum(s.attendances.reduce((sum, a) => sum + toNum(a.totalHours), 0));
+    const totalHours = toNum(
+      s.attendances.reduce(
+        (sum, a) => sum + toNum(a.manualTotalHours ?? a.totalHours),
+        0,
+      ),
+    );
+    const overtimeHours = toNum(
+      s.attendances.reduce((sum, a) => sum + toNum(a.overtimeHours), 0),
+    );
     const daysPresent = s.attendances.filter((a) => a.loginTime || a.status === "PRESENT").length;
     const attendanceRate = s.attendances.length
       ? Math.round((daysPresent / s.attendances.length) * 100)
       : 0;
     const monthlySalary = s.salary || 0;
+    const standardHours = getStandardShiftHours(s.shift);
+    const hourlyRate = standardHours > 0 ? monthlySalary / (30 * standardHours) : 0;
+    const overtimeCost = Math.round(
+      overtimeHours * hourlyRate * payrollPolicy.overtimeRateMultiplier,
+    );
 
     return {
       id: s.id, name: s.name, role: s.role,
@@ -391,6 +437,8 @@ export const getStaffProductivityService = async (
       shift: s.shift || "—",
       monthlySalary,
       totalHours: Math.round(totalHours),
+      overtimeHours: Math.round(overtimeHours),
+      overtimeCost,
       daysPresent,
       attendanceRate,
       dailyCost: Math.round(monthlySalary / 30),
@@ -399,17 +447,18 @@ export const getStaffProductivityService = async (
   });
 
   // Department breakdown
-  const deptMap: Record<string, { count: number; salary: number; hours: number }> = {};
+  const deptMap: Record<string, { count: number; salary: number; hours: number; overtimeCost: number }> = {};
   staffData.forEach((s) => {
     const d = s.department;
-    if (!deptMap[d]) deptMap[d] = { count: 0, salary: 0, hours: 0 };
+    if (!deptMap[d]) deptMap[d] = { count: 0, salary: 0, hours: 0, overtimeCost: 0 };
     deptMap[d].count++;
     deptMap[d].salary += s.monthlySalary;
     deptMap[d].hours += s.totalHours;
+    deptMap[d].overtimeCost += s.overtimeCost;
   });
   const deptData = Object.entries(deptMap).map(([dept, d]) => ({
     dept, count: d.count,
-    totalSalary: Math.round(d.salary),
+    totalSalary: Math.round(d.salary + d.overtimeCost),
     totalHours: Math.round(d.hours),
     avgSalary: d.count ? Math.round(d.salary / d.count) : 0,
   }));
@@ -424,7 +473,8 @@ export const getStaffProductivityService = async (
       night: Math.round(shiftRevenue.night),
     },
     totals: {
-      totalLabourCost: staffData.reduce((s, st) => s + st.monthlySalary, 0),
+      totalLabourCost: staffData.reduce((s, st) => s + st.monthlySalary + st.overtimeCost, 0),
+      totalOvertimeCost: staffData.reduce((s, st) => s + st.overtimeCost, 0),
       totalHoursWorked: staffData.reduce((s, st) => s + st.totalHours, 0),
       totalStaff: staffData.length,
     },

@@ -77,6 +77,15 @@ model Branch {
   pincode              String?
   openingTime          String? // "HH:mm" 24hr — used to compute the staff late-arrival cutoff
   closingTime          String? // "HH:mm" 24hr — used for the after-closing daily stock audit reminder
+
+  // Payroll policy: standard hours per shift type, used to derive an hourly
+  // rate from a staff member's monthly salary (salary / (30 * standardHours
+  // for their shift)), and the overtime pay multiplier applied to
+  // Attendance.overtimeHours. All owner-configurable per branch.
+  morningShiftHours      Float? @default(6)
+  eveningShiftHours      Float? @default(6)
+  fullDayShiftHours      Float? @default(10)
+  overtimeRateMultiplier Float? @default(1.5)
   menuItems            MenuItem[]
   tables               RestaurantTable[]
   isActive             Boolean               @default(true)
