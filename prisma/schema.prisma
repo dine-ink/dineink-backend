@@ -663,6 +663,13 @@ model Attendance {
 
   totalHours Float? @default(0)
 
+  // Owner-entered override for this day's hours, and additional overtime
+  // hours — both entered manually from owner-web, independent of whatever
+  // the POS clock-in/out computed. When set, manualTotalHours is used in
+  // place of the auto-computed totalHours for payroll/display purposes.
+  manualTotalHours Float?
+  overtimeHours    Float? @default(0)
+
   status String? // PRESENT, ABSENT, HALF_DAY
 
   createdAt DateTime @default(now())
