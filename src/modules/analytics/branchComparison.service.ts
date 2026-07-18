@@ -7,6 +7,15 @@ const buildDateFilter = (from?: string, to?: string) =>
     ? { createdAt: { gte: new Date(from), lte: new Date(to + "T23:59:59.999Z") } }
     : {};
 
+// Staff salaries are monthly figures — prorate to the comparison's date
+// range so a week-long comparison doesn't attribute a full month's labour
+// cost, matching the salary/30-per-day convention used on Attendance/Insights.
+const daysInRange = (from?: string, to?: string) => {
+  if (!from || !to) return 30;
+  const ms = new Date(to).getTime() - new Date(from).getTime();
+  return Math.max(1, Math.round(ms / 86_400_000) + 1);
+};
+
 // ─── Per-branch data aggregation ─────────────────────────────────────────────
 
 export const getBranchComparisonService = async (
@@ -15,6 +24,8 @@ export const getBranchComparisonService = async (
   to?: string,
 ) => {
   const dateFilter = buildDateFilter(from, to);
+  const paidFilter = { status: "PAID" as const };
+  const rangeDays = daysInRange(from, to);
 
   const [
     branches,
@@ -23,6 +34,7 @@ export const getBranchComparisonService = async (
     paymentBreakdown,
     expenseStats,
     staffStats,
+    customerBreakdown,
   ] = await Promise.all([
     prisma.branch.findMany({
       where: { restaurantId, isDeleted: false },
@@ -31,20 +43,20 @@ export const getBranchComparisonService = async (
     }),
     prisma.bill.groupBy({
       by: ["branchId"],
-      where: { restaurantId, ...dateFilter },
+      where: { restaurantId, ...dateFilter, ...paidFilter },
       _sum: { total: true, discount: true, cgst: true, sgst: true },
       _count: { id: true },
       _avg: { total: true },
     }),
     prisma.bill.groupBy({
       by: ["branchId", "orderType"],
-      where: { restaurantId, ...dateFilter },
+      where: { restaurantId, ...dateFilter, ...paidFilter },
       _count: { id: true },
       _sum: { total: true },
     }),
     prisma.bill.groupBy({
       by: ["branchId", "paymentMethod"],
-      where: { restaurantId, ...dateFilter },
+      where: { restaurantId, ...dateFilter, ...paidFilter },
       _count: { id: true },
       _sum: { total: true },
     }),
@@ -55,7 +67,18 @@ export const getBranchComparisonService = async (
     }),
     prisma.user.groupBy({
       by: ["branchId"],
-      where: { restaurantId, branchId: { not: null } },
+      where: { restaurantId, branchId: { not: null }, isDeleted: false },
+      _count: { id: true },
+      _sum: { salary: true },
+    }),
+    prisma.bill.groupBy({
+      by: ["branchId", "customerId"],
+      where: {
+        restaurantId,
+        ...dateFilter,
+        ...paidFilter,
+        customerId: { not: null },
+      },
       _count: { id: true },
     }),
   ]);
@@ -65,7 +88,9 @@ export const getBranchComparisonService = async (
     branches.map(async (branch) => {
       const items = await prisma.billItem.groupBy({
         by: ["itemName"],
-        where: { bill: { branchId: branch.id, restaurantId, ...dateFilter } },
+        where: {
+          bill: { branchId: branch.id, restaurantId, ...dateFilter, ...paidFilter },
+        },
         _sum: { quantity: true, total: true },
         orderBy: { _sum: { quantity: "desc" } },
         take: 5,
@@ -82,13 +107,18 @@ export const getBranchComparisonService = async (
     const payments = paymentBreakdown.filter((p) => p.branchId === branch.id);
     const topItems =
       topItemsByBranch.find((t) => t.branchId === branch.id)?.items || [];
+    const customerRows = customerBreakdown.filter((c) => c.branchId === branch.id);
 
     const revenue = toNum(bills?._sum.total);
     const discount = toNum(bills?._sum.discount);
     const gst = toNum(bills?._sum.cgst) + toNum(bills?._sum.sgst);
     const expenseTotal = toNum(expenses?._sum.amount);
-    const netProfit = revenue - gst - expenseTotal;
+    const monthlySalaryTotal = toNum(staff?._sum.salary);
+    const labourCost = Math.round(monthlySalaryTotal * (rangeDays / 30));
+    const netProfit = revenue - gst - expenseTotal - labourCost;
     const orders = bills?._count.id || 0;
+    const totalCustomers = customerRows.length;
+    const repeatCustomers = customerRows.filter((c) => c._count.id > 1).length;
 
     return {
       branch,
@@ -98,8 +128,15 @@ export const getBranchComparisonService = async (
       discount,
       gst,
       expenses: expenseTotal,
+      labourCost,
       netProfit,
       staffCount: staff?._count.id || 0,
+      totalCustomers,
+      repeatCustomers,
+      repeatCustomerRate:
+        totalCustomers > 0
+          ? Math.round((repeatCustomers / totalCustomers) * 100)
+          : 0,
       orderTypes: orderTypes.map((o) => ({
         type: o.orderType,
         count: o._count.id,
@@ -127,6 +164,40 @@ export const getCityComparisonService = async (
   to?: string,
 ) => {
   const branchData = await getBranchComparisonService(restaurantId, from, to);
+  const dateFilter = buildDateFilter(from, to);
+
+  // Group branches by city up front so customer counts can be computed with
+  // one dedicated query per city — summing each branch's customer counts
+  // would double-count anyone who visited more than one branch in the city.
+  const branchIdsByCity: Record<string, number[]> = {};
+  for (const bd of branchData) {
+    const city = bd.branch.city?.trim() || "Unknown";
+    (branchIdsByCity[city] ||= []).push(bd.branch.id);
+  }
+
+  const customersByCity = await Promise.all(
+    Object.entries(branchIdsByCity).map(async ([city, branchIds]) => {
+      const rows = await prisma.bill.groupBy({
+        by: ["customerId"],
+        where: {
+          restaurantId,
+          branchId: { in: branchIds },
+          ...dateFilter,
+          status: "PAID",
+          customerId: { not: null },
+        },
+        _count: { id: true },
+      });
+      return {
+        city,
+        totalCustomers: rows.length,
+        repeatCustomers: rows.filter((r) => r._count.id > 1).length,
+      };
+    }),
+  );
+  const customersMapByCity = Object.fromEntries(
+    customersByCity.map((c) => [c.city, c]),
+  );
 
   type CityAgg = {
     city: string;
@@ -136,6 +207,7 @@ export const getCityComparisonService = async (
     discount: number;
     gst: number;
     expenses: number;
+    labourCost: number;
     netProfit: number;
     staffCount: number;
     orderTypes: Record<string, { count: number; revenue: number }>;
@@ -156,6 +228,7 @@ export const getCityComparisonService = async (
         discount: 0,
         gst: 0,
         expenses: 0,
+        labourCost: 0,
         netProfit: 0,
         staffCount: 0,
         orderTypes: {},
@@ -170,6 +243,7 @@ export const getCityComparisonService = async (
     c.discount += bd.discount;
     c.gst += bd.gst;
     c.expenses += bd.expenses;
+    c.labourCost += bd.labourCost;
     c.netProfit += bd.netProfit;
     c.staffCount += bd.staffCount;
 
@@ -190,22 +264,35 @@ export const getCityComparisonService = async (
     }
   }
 
-  return Object.values(cityMap).map((c) => ({
-    city: c.city,
-    branches: c.branches,
-    revenue: c.revenue,
-    orders: c.orders,
-    avgBill: c.orders > 0 ? Math.round(c.revenue / c.orders) : 0,
-    discount: c.discount,
-    gst: c.gst,
-    expenses: c.expenses,
-    netProfit: c.netProfit,
-    staffCount: c.staffCount,
-    orderTypes: Object.entries(c.orderTypes).map(([type, d]) => ({ type, ...d })),
-    payments: Object.entries(c.payments).map(([method, d]) => ({ method, ...d })),
-    topItems: Object.entries(c.topItems)
-      .map(([name, d]) => ({ name, ...d }))
-      .sort((a, b) => b.quantity - a.quantity)
-      .slice(0, 5),
-  }));
+  return Object.values(cityMap).map((c) => {
+    const customers = customersMapByCity[c.city] || {
+      totalCustomers: 0,
+      repeatCustomers: 0,
+    };
+    return {
+      city: c.city,
+      branches: c.branches,
+      revenue: c.revenue,
+      orders: c.orders,
+      avgBill: c.orders > 0 ? Math.round(c.revenue / c.orders) : 0,
+      discount: c.discount,
+      gst: c.gst,
+      expenses: c.expenses,
+      labourCost: c.labourCost,
+      netProfit: c.netProfit,
+      staffCount: c.staffCount,
+      totalCustomers: customers.totalCustomers,
+      repeatCustomers: customers.repeatCustomers,
+      repeatCustomerRate:
+        customers.totalCustomers > 0
+          ? Math.round((customers.repeatCustomers / customers.totalCustomers) * 100)
+          : 0,
+      orderTypes: Object.entries(c.orderTypes).map(([type, d]) => ({ type, ...d })),
+      payments: Object.entries(c.payments).map(([method, d]) => ({ method, ...d })),
+      topItems: Object.entries(c.topItems)
+        .map(([name, d]) => ({ name, ...d }))
+        .sort((a, b) => b.quantity - a.quantity)
+        .slice(0, 5),
+    };
+  });
 };
