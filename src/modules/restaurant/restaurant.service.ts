@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import prisma from "../../config/prisma";
+import { generateToken } from "../../utils/generateToken/generateToken";
 
 export const setupRestaurantService = async (userId: number, body: any) => {
   const { restaurant, branches, staff, categories } = body;
@@ -13,7 +14,7 @@ export const setupRestaurantService = async (userId: number, body: any) => {
   );
 
   // Wrap everything in a transaction — if any step fails, all changes roll back
-  return prisma.$transaction(
+  const result = await prisma.$transaction(
     async (tx) => {
       // Step 1: create restaurant + link to owner
       const createdRestaurant = await tx.restaurant.create({
@@ -27,7 +28,7 @@ export const setupRestaurantService = async (userId: number, body: any) => {
         },
       });
 
-      await tx.user.update({
+      const updatedUser = await tx.user.update({
         where: { id: userId },
         data: { restaurantId: createdRestaurant.id },
       });
@@ -133,10 +134,30 @@ export const setupRestaurantService = async (userId: number, body: any) => {
         );
       }
 
-      return createdRestaurant;
+      return { restaurant: createdRestaurant, branches: createdBranches, user: updatedUser };
     },
     { timeout: 30000 },
   );
+
+  // The signup token was minted before any restaurant/branch existed, so its
+  // restaurantId claim is stale — issue a fresh one now that setup created
+  // and linked them, otherwise the owner stays "restaurant-less" until they
+  // log out and back in.
+  const { password: _password, ...safeUser } = result.user;
+  const token = generateToken({
+    id: safeUser.id,
+    email: safeUser.email,
+    role: safeUser.role,
+    restaurantId: safeUser.restaurantId,
+    branchId: safeUser.branchId,
+  });
+
+  return {
+    token,
+    user: safeUser,
+    restaurant: result.restaurant,
+    branches: result.branches,
+  };
 };
 
 export const getShopsService = async (userId: number) => {

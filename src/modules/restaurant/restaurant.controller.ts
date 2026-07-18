@@ -40,7 +40,10 @@ export const setupRestaurant = async (req: any, res: Response) => {
 
     return res.status(200).json({
       success: true,
-      data,
+      token: data.token,
+      user: data.user,
+      restaurant: data.restaurant,
+      branches: data.branches,
     });
   } catch (error: any) {
     console.log(error.stack);
