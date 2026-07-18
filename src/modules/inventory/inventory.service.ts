@@ -1,5 +1,21 @@
 import prisma from "../../config/prisma";
 
+// Converts a recipe quantity (in the recipe's own unit, e.g. "gm") into the
+// ingredient's stock-tracking unit (e.g. "Kg") so wastage/consumption math
+// never mixes grams against kilograms (or ml against litres) unconverted.
+export const convertQtyToIngredientUnit = (
+  qty: number,
+  fromUnit?: string | null,
+  toUnit?: string | null,
+) => {
+  const from = (fromUnit || "").toLowerCase();
+  const to = (toUnit || "").toLowerCase();
+  if (!from || !to || from === to) return qty;
+  if (to === "kg" && (from === "gram" || from === "gm" || from === "g")) return qty / 1000;
+  if (to === "litre" && (from === "ml" || from === "milliliter" || from === "millilitre")) return qty / 1000;
+  return qty;
+};
+
 export const getMenuManagementService = async (
   restaurantId: number,
   branchId?: number,
@@ -254,14 +270,16 @@ export const getDailyAuditPreviewService = async (
     menuItemIds.length > 0
       ? await prisma.menuItemIngredient.findMany({
           where: { menuItemId: { in: menuItemIds } },
-          select: { menuItemId: true, ingredientId: true, quantity: true },
+          select: { menuItemId: true, ingredientId: true, quantity: true, unit: true },
         })
       : [];
 
-  const miiMap = new Map<number, { ingredientId: number; quantity: number }[]>();
+  const ingredientUnitMap = new Map(ingredients.map((i) => [i.id, i.unit]));
+
+  const miiMap = new Map<number, { ingredientId: number; quantity: number; unit: string | null }[]>();
   for (const mii of menuItemIngredients) {
     if (!miiMap.has(mii.menuItemId)) miiMap.set(mii.menuItemId, []);
-    miiMap.get(mii.menuItemId)!.push({ ingredientId: mii.ingredientId, quantity: mii.quantity });
+    miiMap.get(mii.menuItemId)!.push({ ingredientId: mii.ingredientId, quantity: mii.quantity, unit: mii.unit });
   }
 
   const sopConsumedMap = new Map<number, number>();
@@ -269,7 +287,12 @@ export const getDailyAuditPreviewService = async (
     for (const item of bill.items) {
       if (!item.menuItemId) continue;
       for (const mii of miiMap.get(item.menuItemId) || []) {
-        sopConsumedMap.set(mii.ingredientId, (sopConsumedMap.get(mii.ingredientId) || 0) + item.quantity * mii.quantity);
+        const convertedQty = convertQtyToIngredientUnit(
+          mii.quantity,
+          mii.unit,
+          ingredientUnitMap.get(mii.ingredientId),
+        );
+        sopConsumedMap.set(mii.ingredientId, (sopConsumedMap.get(mii.ingredientId) || 0) + item.quantity * convertedQty);
       }
     }
   }
@@ -295,7 +318,8 @@ export const getDailyAuditPreviewService = async (
       sopConsumed,
       expectedClosing: Math.round(expectedClosing * 1000) / 1000,
       closingQty: existing ? existing.closingQty : null, // null = not yet entered
-      wastage: existing ? existing.closingQty !== null ? Math.max(0, expectedClosing - existing.closingQty) : null : null,
+      // Positive = wastage (used more than expected), negative = under-used.
+      wastage: existing ? existing.closingQty !== null ? Math.round((expectedClosing - existing.closingQty) * 1000) / 1000 : null : null,
       notes: existing?.notes || null,
       auditSaved: !!existing,
     };
@@ -313,7 +337,8 @@ export const saveDailyAuditService = async (
   const auditDate = new Date(date + "T00:00:00.000Z");
 
   const rows = entries.map((e) => {
-    const wastage = Math.max(0, (e.openingQty - e.sopConsumed) - e.closingQty);
+    // Positive = wastage (used more than expected), negative = under-used.
+    const wastage = (e.openingQty - e.sopConsumed) - e.closingQty;
     return {
       restaurantId,
       branchId,
@@ -439,12 +464,13 @@ export const getIngredientLifecycleService = async (
   }
 
   // Build menuItemId → ingredient usage map
-  const miiMap = new Map<number, { ingredientId: number; quantity: number; dishName: string }[]>();
+  const miiMap = new Map<number, { ingredientId: number; quantity: number; unit: string | null; dishName: string }[]>();
   for (const mii of menuItemIngredients) {
     if (!miiMap.has(mii.menuItemId)) miiMap.set(mii.menuItemId, []);
     miiMap.get(mii.menuItemId)!.push({
       ingredientId: mii.ingredientId,
       quantity: mii.quantity,
+      unit: (mii as any).unit ?? null,
       dishName: mii.menuItem.name,
     });
   }
@@ -460,15 +486,23 @@ export const getIngredientLifecycleService = async (
         if (!dishUsage.has(mii.ingredientId)) dishUsage.set(mii.ingredientId, new Map());
         const dm = dishUsage.get(mii.ingredientId)!;
         if (!dm.has(item.itemName)) dm.set(item.itemName, { qty: 0, orders: 0 });
-        dm.get(item.itemName)!.qty += item.quantity * mii.quantity;
+        const convertedQty = convertQtyToIngredientUnit(
+          mii.quantity,
+          mii.unit,
+          ingredientById.get(mii.ingredientId)?.unit,
+        );
+        dm.get(item.itemName)!.qty += item.quantity * convertedQty;
         dm.get(item.itemName)!.orders += item.quantity;
       }
     }
   }
 
-  // Per ingredient: adjustments
+  // Per ingredient: adjustments — SALE_DEDUCTION rows are routine per-sale
+  // stock decrements auto-logged on every paid bill, not wastage, so they're
+  // excluded from the wastage-log/unaccounted-wastage math below.
   const adjByIngredient = new Map<number, any[]>();
   for (const adj of adjustments) {
+    if (adj.adjustmentType === "SALE_DEDUCTION") continue;
     if (!adjByIngredient.has(adj.ingredientId)) adjByIngredient.set(adj.ingredientId, []);
     adjByIngredient.get(adj.ingredientId)!.push({
       type: adj.adjustmentType,
@@ -512,7 +546,8 @@ export const getIngredientLifecycleService = async (
     const loggedWastage = adjEntries.reduce((s: number, a: any) => s + a.qty, 0);
 
     // Formula 3: Wastage = Opening + Purchases − Closing − Expected Consumption
-    const wastageQty = Math.max(0, consumed - usedInDishes);
+    // Positive = wastage (used more than expected), negative = under-used.
+    const wastageQty = consumed - usedInDishes;
     // Formula 1: Wastage % = (Wastage Qty / Total Received) × 100
     const wastagePercentage = available > 0 ? Math.round((wastageQty / available) * 10000) / 100 : 0;
     // Formula 2: Wastage Cost = Wastage Qty × Unit Cost
