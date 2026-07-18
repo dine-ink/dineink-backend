@@ -101,6 +101,8 @@ function aggregateBills(bills: any[]) {
   const itemMap: Record<string, number> = {};
   const revenueByDate: Record<string, number> = {};
   const ordersByDate: Record<string, number> = {};
+  const revenueByOrderType: Record<string, number> = {};
+  const ordersByOrderType: Record<string, number> = {};
 
   for (const bill of bills) {
     const hour = new Date(bill.createdAt).getHours();
@@ -113,6 +115,10 @@ function aggregateBills(bills: any[]) {
     }
 
     paymentMap[bill.paymentMethod] = (paymentMap[bill.paymentMethod] || 0) + bill.total;
+
+    const orderType = bill.orderType || "UNKNOWN";
+    revenueByOrderType[orderType] = (revenueByOrderType[orderType] || 0) + bill.total;
+    ordersByOrderType[orderType] = (ordersByOrderType[orderType] || 0) + 1;
 
     for (const item of bill.items) {
       itemMap[item.itemName] = (itemMap[item.itemName] || 0) + item.quantity;
@@ -153,6 +159,8 @@ function aggregateBills(bills: any[]) {
     paymentSplit: paymentMap,
     revenueByDate,
     ordersByDate,
+    revenueByOrderType,
+    ordersByOrderType,
     hourlyAnalytics,
     peakHours: formatHour(peakHour),
   };
