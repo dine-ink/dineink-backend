@@ -564,3 +564,136 @@ export const getRevenueForecastService = async (
     weeklyRevenue,
   };
 };
+
+// ─── 6. Menu Engineering (Kasavana & Smith matrix: Stars/Plowhorses/Puzzles/Dogs) ─
+
+const recipeCostOf = (menuItem: {
+  menuItemIngredients: {
+    quantity: number;
+    unit: string;
+    ingredient: { pricePerUnit: number | null; unit: string | null } | null;
+  }[];
+}) =>
+  menuItem.menuItemIngredients.reduce((sum, m) => {
+    const ing = m.ingredient;
+    if (!ing?.pricePerUnit) return sum;
+    const mappingUnit = (m.unit || "").toLowerCase();
+    const ingredientUnit = (ing.unit || "").toLowerCase();
+    let cost: number;
+    if (mappingUnit === ingredientUnit) {
+      cost = m.quantity * ing.pricePerUnit;
+    } else if (ingredientUnit === "kg" && ["gram", "grams", "gm", "g"].includes(mappingUnit)) {
+      cost = (m.quantity / 1000) * ing.pricePerUnit;
+    } else if (ingredientUnit === "litre" && ["ml", "millilitre", "milliliter"].includes(mappingUnit)) {
+      cost = (m.quantity / 1000) * ing.pricePerUnit;
+    } else {
+      cost = m.quantity * ing.pricePerUnit;
+    }
+    return sum + cost;
+  }, 0);
+
+export const getMenuEngineeringService = async (
+  restaurantId: number,
+  branchId?: number,
+  from?: string,
+  to?: string,
+) => {
+  const dateFilter = buildDateFilter(from, to);
+  const branchFilter = branchId ? { branchId } : {};
+
+  const [menuItems, billItemStats] = await Promise.all([
+    prisma.menuItem.findMany({
+      where: { restaurantId, isDeleted: false },
+      select: {
+        id: true,
+        name: true,
+        price: true,
+        category: { select: { name: true } },
+        menuItemIngredients: {
+          select: {
+            quantity: true,
+            unit: true,
+            ingredient: { select: { pricePerUnit: true, unit: true } },
+          },
+        },
+      },
+    }),
+    prisma.billItem.groupBy({
+      by: ["menuItemId"],
+      where: {
+        menuItemId: { not: null },
+        bill: { restaurantId, ...branchFilter, ...dateFilter, status: "PAID" },
+      },
+      _sum: { quantity: true, total: true },
+    }),
+  ]);
+
+  const salesByItem = new Map(billItemStats.map((b) => [b.menuItemId, b]));
+
+  const items = menuItems.map((mi) => {
+    const sales = salesByItem.get(mi.id);
+    const quantitySold = toNum(sales?._sum.quantity);
+    const revenue = toNum(sales?._sum.total);
+    const cost = Math.round(recipeCostOf(mi) * 100) / 100;
+    const margin = mi.price - cost;
+    return {
+      id: mi.id,
+      name: mi.name,
+      category: mi.category?.name || "Uncategorized",
+      price: mi.price,
+      cost,
+      margin: Math.round(margin * 100) / 100,
+      marginPct: mi.price > 0 ? Math.round((margin / mi.price) * 1000) / 10 : 0,
+      quantitySold,
+      revenue,
+    };
+  });
+
+  const soldItems = items.filter((i) => i.quantitySold > 0);
+  const notSold = items.filter((i) => i.quantitySold === 0);
+  const totalQtySold = soldItems.reduce((s, i) => s + i.quantitySold, 0);
+  const itemCount = soldItems.length;
+
+  // Menu Engineering (Kasavana & Smith) thresholds:
+  // - Popularity: an item's share of total units sold vs. the "fair share"
+  //   it would get if demand were spread evenly across the menu (1/itemCount).
+  //   Popular if actual share >= 70% of fair share — the standard threshold.
+  // - Contribution margin: "high" if at/above the quantity-weighted average
+  //   margin per unit sold across the whole menu.
+  const fairShare = itemCount > 0 ? 1 / itemCount : 0;
+  const popularityThreshold = fairShare * 0.7;
+  const totalMargin = soldItems.reduce((s, i) => s + i.margin * i.quantitySold, 0);
+  const avgMargin = totalQtySold > 0 ? totalMargin / totalQtySold : 0;
+
+  const classified = soldItems.map((i) => {
+    const popularityShare = totalQtySold > 0 ? i.quantitySold / totalQtySold : 0;
+    const isPopular = popularityShare >= popularityThreshold;
+    const isHighMargin = i.margin >= avgMargin;
+    const classification =
+      isPopular && isHighMargin
+        ? "STAR"
+        : isPopular && !isHighMargin
+          ? "PLOWHORSE"
+          : !isPopular && isHighMargin
+            ? "PUZZLE"
+            : "DOG";
+    return {
+      ...i,
+      popularityShare: Math.round(popularityShare * 1000) / 10,
+      classification,
+    };
+  });
+
+  return {
+    items: classified,
+    notSold,
+    summary: {
+      star: classified.filter((i) => i.classification === "STAR").length,
+      plowhorse: classified.filter((i) => i.classification === "PLOWHORSE").length,
+      puzzle: classified.filter((i) => i.classification === "PUZZLE").length,
+      dog: classified.filter((i) => i.classification === "DOG").length,
+      avgMargin: Math.round(avgMargin * 100) / 100,
+      popularityThresholdPct: Math.round(popularityThreshold * 1000) / 10,
+    },
+  };
+};

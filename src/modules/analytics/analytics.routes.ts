@@ -13,6 +13,7 @@ import {
   getCustomerRFM,
   getStaffProductivity,
   getRevenueForecast,
+  getMenuEngineering,
 } from "./analytics.controller";
 import { authMiddleware } from "../../middleware/auth";
 
@@ -35,5 +36,6 @@ router.get("/:restaurantId/hourly-heatmap", authMiddleware, getHourlyHeatmap);
 router.get("/:restaurantId/customer-rfm", authMiddleware, getCustomerRFM);
 router.get("/:restaurantId/staff-productivity", authMiddleware, getStaffProductivity);
 router.get("/:restaurantId/revenue-forecast", authMiddleware, getRevenueForecast);
+router.get("/:restaurantId/menu-engineering", authMiddleware, getMenuEngineering);
 
 export default router;

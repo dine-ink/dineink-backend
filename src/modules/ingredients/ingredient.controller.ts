@@ -63,6 +63,23 @@ export const getIngredients = async (req: any, res: any) => {
   }
 };
 
+export const getReorderAlerts = async (req: any, res: any) => {
+  try {
+    const restaurantId = Number(req.params.restaurantId);
+    const data = await ingredientService.getReorderAlertsService(restaurantId);
+    res.json({
+      success: true,
+      data,
+    });
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch reorder alerts",
+    });
+  }
+};
+
 export const aiSuggestMapping = async (req: any, res: any) => {
   try {
     const restaurantId = req.user.restaurantId;

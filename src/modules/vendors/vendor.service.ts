@@ -130,3 +130,112 @@ export const getVendorOutstandingService = async (
     };
   });
 };
+
+// ── Vendor Performance (purchase volume, payment status, price trend) ────────
+//
+// The schema has no delivery-quality or on-time-delivery signal for vendors —
+// invoices only carry amounts/dates. So this reports what's actually
+// knowable: how much you buy from each vendor, what you still owe them (and
+// how much of that is overdue), and whether the ingredients they supply have
+// been getting more or less expensive over time (via IngredientPriceHistory,
+// linked through IngredientVendor since price history itself isn't
+// vendor-tagged — this is a "price trend for what this vendor supplies", not
+// a per-transaction vendor price, which the schema can't distinguish).
+
+export const getVendorPerformanceService = async (
+  restaurantId: number,
+  branchId: number,
+  from?: string,
+  to?: string,
+) => {
+  const dateFilter =
+    from && to
+      ? { invoiceDate: { gte: new Date(from), lte: new Date(to + "T23:59:59.999Z") } }
+      : {};
+
+  const [vendors, invoices, ingredientLinks] = await Promise.all([
+    prisma.vendor.findMany({ where: { restaurantId, branchId } }),
+    prisma.vendorInvoice.findMany({
+      where: { restaurantId, branchId, ...dateFilter },
+    }),
+    prisma.ingredientVendor.findMany({
+      where: { branchId },
+      select: {
+        vendorId: true,
+        ingredient: {
+          select: {
+            id: true,
+            name: true,
+            priceHistory: {
+              orderBy: { createdAt: "asc" },
+              select: { oldPrice: true, newPrice: true, createdAt: true },
+            },
+          },
+        },
+      },
+    }),
+  ]);
+
+  const now = new Date();
+
+  return vendors.map((v) => {
+    const vendorInvoices = invoices.filter((i) => i.vendorId === v.id);
+    const totalPurchaseValue = vendorInvoices.reduce((s, i) => s + i.totalAmount, 0);
+    const totalOutstanding = vendorInvoices.reduce(
+      (s, i) => s + Math.max(0, i.totalAmount - i.paidAmount),
+      0,
+    );
+    const overdueInvoices = vendorInvoices.filter(
+      (i) => i.status !== "PAID" && i.dueDate && i.dueDate < now,
+    );
+    const overdueAmount = overdueInvoices.reduce(
+      (s, i) => s + Math.max(0, i.totalAmount - i.paidAmount),
+      0,
+    );
+    const lastInvoiceDate = vendorInvoices.length
+      ? vendorInvoices.reduce(
+          (latest, i) => (i.invoiceDate > latest ? i.invoiceDate : latest),
+          vendorInvoices[0].invoiceDate,
+        )
+      : null;
+
+    const suppliedIngredients = ingredientLinks
+      .filter((l) => l.vendorId === v.id)
+      .map((l) => l.ingredient);
+
+    const pctChanges: number[] = [];
+    suppliedIngredients.forEach((ing) => {
+      const history = ing.priceHistory;
+      if (!history.length) return;
+      const first = history[0].oldPrice ?? history[0].newPrice;
+      const last = history[history.length - 1].newPrice;
+      if (!first) return;
+      pctChanges.push(((last - first) / first) * 100);
+    });
+    const avgPriceChangePct = pctChanges.length
+      ? Math.round((pctChanges.reduce((s, p) => s + p, 0) / pctChanges.length) * 10) / 10
+      : null;
+
+    return {
+      id: v.id,
+      name: v.name,
+      phone: v.phone,
+      totalPurchaseValue,
+      invoiceCount: vendorInvoices.length,
+      totalOutstanding,
+      overdueAmount,
+      overdueInvoiceCount: overdueInvoices.length,
+      lastInvoiceDate,
+      suppliedIngredientCount: suppliedIngredients.length,
+      avgPriceChangePct,
+      priceTrend:
+        avgPriceChangePct == null
+          ? "NO_DATA"
+          : avgPriceChangePct > 2
+            ? "RISING"
+            : avgPriceChangePct < -2
+              ? "FALLING"
+              : "STABLE",
+    };
+  });
+};

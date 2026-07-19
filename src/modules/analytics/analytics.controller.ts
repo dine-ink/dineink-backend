@@ -17,6 +17,7 @@ import {
   getCustomerRFMService,
   getStaffProductivityService,
   getRevenueForecastService,
+  getMenuEngineeringService,
 } from "./analyticsAdvanced.service";
 
 export const getRestaurantDashboardOverview = async (
@@ -244,6 +245,16 @@ export const getRevenueForecast = async (req: Request, res: Response) => {
     const restaurantId = Number(req.params.restaurantId);
     const branchId = req.query.branchId ? Number(req.query.branchId) : undefined;
     const data = await getRevenueForecastService(restaurantId, branchId);
+    return res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const getMenuEngineering = async (req: Request, res: Response) => {
+  try {
+    const { restaurantId, branchId, from, to } = extractParams(req);
+    const data = await getMenuEngineeringService(restaurantId, branchId, from, to);
     return res.status(200).json({ success: true, data });
   } catch (error: any) {
     return res.status(400).json({ success: false, message: error.message });

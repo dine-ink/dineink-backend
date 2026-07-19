@@ -12,6 +12,7 @@ import {
   updateIngredientPriceHandler,
   getIngredientPriceHistoryHandler,
   getIngredientsByVendorHandler,
+  getReorderAlerts,
 } from "./ingredient.controller";
 import { authMiddleware } from "../../middleware/auth";
 
@@ -20,6 +21,7 @@ const router = express.Router();
 router.post("/generateIngredients", generateIngredients);
 router.post("/saveIngredients", saveIngredients);
 router.get("/:restaurantId/getRestaurantIngredients", getIngredients);
+router.get("/:restaurantId/reorder-alerts", authMiddleware, getReorderAlerts);
 router.post("/ai-suggestIngredients", authMiddleware, aiSuggestMapping);
 router.post("/uploadVendorData", authMiddleware, uploadVendors);
 router.get("/:restaurantId/:branchId/fetchVendors", authMiddleware, getVendors);

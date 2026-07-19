@@ -179,6 +179,54 @@ export const getIngredients = async (restaurantId: number) => {
   return formatted;
 };
 
+// Ingredient.reorderLevel has existed in the schema but nothing ever
+// checked current stock against it — this actually surfaces the alert.
+// Only ingredients with a reorder level set are evaluated; an unset
+// (null) level means the owner hasn't configured a threshold yet, which
+// is different from "0" and shouldn't be treated as an alert.
+export const getReorderAlertsService = async (restaurantId: number) => {
+  const ingredients = await prisma.ingredient.findMany({
+    where: { restaurantId, reorderLevel: { not: null } },
+    select: {
+      id: true,
+      name: true,
+      quantity: true,
+      unit: true,
+      reorderLevel: true,
+      category: { select: { name: true } },
+    },
+  });
+
+  const alerts = ingredients
+    .filter((i) => (i.quantity ?? 0) <= (i.reorderLevel ?? 0))
+    .map((i) => {
+      const quantity = i.quantity ?? 0;
+      const reorderLevel = i.reorderLevel ?? 0;
+      return {
+        id: i.id,
+        name: i.name,
+        category: i.category?.name || "Uncategorized",
+        quantity,
+        unit: i.unit || "",
+        reorderLevel,
+        shortfall: Math.max(0, reorderLevel - quantity),
+        severity: quantity <= 0 ? "OUT_OF_STOCK" : "LOW_STOCK",
+      };
+    })
+    .sort((a, b) => {
+      if (a.severity !== b.severity) return a.severity === "OUT_OF_STOCK" ? -1 : 1;
+      const aRatio = a.reorderLevel > 0 ? a.quantity / a.reorderLevel : 0;
+      const bRatio = b.reorderLevel > 0 ? b.quantity / b.reorderLevel : 0;
+      return aRatio - bRatio;
+    });
+
+  return {
+    alerts,
+    totalIngredientsTracked: ingredients.length,
+    alertCount: alerts.length,
+  };
+};
+
 export const aiSuggestMappingData = async (restaurantId: number, body: any) => {
   const { menuItemId } = body;
 

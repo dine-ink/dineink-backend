@@ -8,6 +8,7 @@ import {
   payVendorInvoiceService,
   deleteVendorInvoiceService,
   getVendorOutstandingService,
+  getVendorPerformanceService,
 } from "./vendor.service";
 
 export const getVendorPayments = async (req: Request, res: Response) => {
@@ -95,5 +96,19 @@ export const getVendorOutstanding = async (req: Request, res: Response) => {
   } catch (err) {
     console.log(err);
     return res.status(500).json({ success: false, message: "Failed to fetch outstanding" });
+  }
+};
+
+export const getVendorPerformance = async (req: Request, res: Response) => {
+  try {
+    const restaurantId = Number(req.params.restaurantId);
+    const branchId = Number(req.params.branchId);
+    const from = req.query.from as string | undefined;
+    const to = req.query.to as string | undefined;
+    const data = await getVendorPerformanceService(restaurantId, branchId, from, to);
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({ success: false, message: "Failed to fetch vendor performance" });
   }
 };

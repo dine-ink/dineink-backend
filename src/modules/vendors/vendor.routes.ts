@@ -8,6 +8,7 @@ import {
   payVendorInvoice,
   deleteVendorInvoice,
   getVendorOutstanding,
+  getVendorPerformance,
 } from "./vendor.controller";
 import { authMiddleware } from "../../middleware/auth";
 
@@ -15,6 +16,9 @@ const router = express.Router();
 
 // Outstanding summary for all vendors of a branch
 router.get("/outstanding/:restaurantId/:branchId", authMiddleware, getVendorOutstanding);
+
+// Purchase volume, overdue balances and price-trend per vendor
+router.get("/performance/:restaurantId/:branchId", authMiddleware, getVendorPerformance);
 
 // Payments
 router.get("/:vendorId/payments", authMiddleware, getVendorPayments);
