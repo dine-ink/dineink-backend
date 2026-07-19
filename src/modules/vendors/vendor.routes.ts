@@ -9,6 +9,7 @@ import {
   deleteVendorInvoice,
   getVendorOutstanding,
   getVendorPerformance,
+  getVendorInvoiceActivity,
 } from "./vendor.controller";
 import { authMiddleware } from "../../middleware/auth";
 
@@ -19,6 +20,10 @@ router.get("/outstanding/:restaurantId/:branchId", authMiddleware, getVendorOuts
 
 // Purchase volume, overdue balances and price-trend per vendor
 router.get("/performance/:restaurantId/:branchId", authMiddleware, getVendorPerformance);
+
+// Whether any vendor invoice has ever been logged for this branch (used to
+// distinguish "no purchasing data" from "fully paid" in Cash Conversion Cycle)
+router.get("/invoice-activity/:restaurantId/:branchId", authMiddleware, getVendorInvoiceActivity);
 
 // Payments
 router.get("/:vendorId/payments", authMiddleware, getVendorPayments);

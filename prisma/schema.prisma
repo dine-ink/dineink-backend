@@ -87,6 +87,10 @@ model Branch {
   eveningShiftHours      Float? @default(6)
   fullDayShiftHours      Float? @default(10)
   overtimeRateMultiplier Float? @default(1.5)
+
+  // Floor area, for Sales per Sq. Ft. (Annual Sales / area).
+  areaSqFt Float?
+
   menuItems            MenuItem[]
   tables               RestaurantTable[]
   isActive             Boolean               @default(true)
@@ -571,6 +575,7 @@ model RestaurantInsights {
   gas                  Float? @default(0)
   maintenance          Float? @default(0)
   fuel                 Float? @default(0)
+  marketingSpend       Float? @default(0)
 
   /**
    * FINANCIAL TARGETS
@@ -612,6 +617,12 @@ model RestaurantInsights {
    * purchases can still get accurate P&L figures.
    */
   manualFoodCost Float? @default(0)
+
+  /**
+   * ROI — the owner's one-time initial capital investment in this branch,
+   * used to compute ROI = (cumulative net profit - investment) / investment.
+   */
+  initialInvestment Float? @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

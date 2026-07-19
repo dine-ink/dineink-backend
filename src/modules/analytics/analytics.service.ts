@@ -188,7 +188,7 @@ export const getDashboardOverviewService = async (
     createdAt: { gte: startDate, lte: endDate },
   };
 
-  const [bills, occupiedTables, branches, menuItemsWithCategory] = await Promise.all([
+  const [bills, occupiedTables, branches, menuItemsWithCategory, newCustomersCount, cancelledStats] = await Promise.all([
     prisma.bill.findMany({
       where: billWhere,
       select: billSelect,
@@ -201,6 +201,25 @@ export const getDashboardOverviewService = async (
     prisma.menuItem.findMany({
       where: { restaurantId, isDeleted: false },
       select: { name: true, category: { select: { name: true } } },
+    }),
+    // A Customer row is only ever created (never just updated) the first
+    // time a phone number is seen (see closeRunningOrderService's upsert),
+    // so its createdAt is an accurate "first purchase" timestamp — this
+    // count is restaurant-wide (Customer has no branchId), used for CAC.
+    prisma.customer.count({
+      where: { restaurantId, createdAt: { gte: startDate, lte: endDate } },
+    }),
+    // There's no separate refund record — CANCELLED bills are the closest
+    // proxy for "money given back", used to approximate Refund %.
+    prisma.bill.aggregate({
+      where: {
+        restaurantId,
+        ...branchFilter,
+        status: "CANCELLED",
+        createdAt: { gte: startDate, lte: endDate },
+      },
+      _sum: { total: true },
+      _count: { id: true },
     }),
   ]);
 
@@ -233,6 +252,9 @@ export const getDashboardOverviewService = async (
     topCategories,
     occupiedTables,
     branches,
+    newCustomersCount,
+    cancelledTotal: cancelledStats._sum.total || 0,
+    cancelledCount: cancelledStats._count.id || 0,
     recentOrders: bills.slice(0, 10),
   };
 
@@ -303,6 +325,99 @@ export const getRestaurantInsightsData = async (restaurantId: number) => {
   }, {});
 
   return { ...totals, revenue };
+};
+
+const parseHHMM = (t?: string | null) => {
+  if (!t) return null;
+  const [h, m] = t.split(":").map(Number);
+  if (Number.isNaN(h)) return null;
+  return h + (m || 0) / 60;
+};
+
+// ─── getTableOperationsService (Table Turnover Rate + Seat Utilization) ───────
+export const getTableOperationsService = async (
+  restaurantId: number,
+  branchId: number,
+  from?: string,
+  to?: string,
+) => {
+  const { startDate, endDate } = getDateRange("month", from, to);
+
+  const [tables, branch, closedOrders] = await Promise.all([
+    prisma.restaurantTable.findMany({
+      where: { restaurantId, branchId, isTemporary: false },
+      select: { id: true, capacity: true },
+    }),
+    prisma.branch.findUnique({
+      where: { id: branchId },
+      select: { openingTime: true, closingTime: true },
+    }),
+    // status flips to "CLOSED" only when the bill is settled and the table is
+    // freed (see closeRunningOrderService) — updatedAt is that closure
+    // moment, since completedAt is only ever set by the kitchen-ready flow.
+    prisma.runningOrder.findMany({
+      where: {
+        restaurantId,
+        branchId,
+        status: "CLOSED",
+        tableId: { not: null },
+        updatedAt: { gte: startDate, lte: endDate },
+      },
+      select: { tableId: true, startedAt: true, updatedAt: true },
+    }),
+  ]);
+
+  const totalTables = tables.length;
+  const totalCapacity = tables.reduce((s, t) => s + (t.capacity || 0), 0);
+  const tablesWithMissingCapacity = tables.filter((t) => !t.capacity).length;
+  const periodDays = Math.max(
+    1,
+    Math.round((endDate.getTime() - startDate.getTime()) / 86_400_000) + 1,
+  );
+
+  const openHour = parseHHMM(branch?.openingTime);
+  const closeHour = parseHHMM(branch?.closingTime);
+  const hasOperatingHours =
+    openHour !== null && closeHour !== null && closeHour > openHour;
+  // Default to a 12-hour operating day when the branch hasn't configured hours.
+  const operatingHoursPerDay = hasOperatingHours ? closeHour! - openHour! : 12;
+
+  const turnoverCount = closedOrders.length;
+  const tableTurnoverRate = totalTables > 0 ? turnoverCount / totalTables : 0;
+  const turnsPerTablePerDay =
+    totalTables > 0 ? turnoverCount / totalTables / periodDays : 0;
+
+  // Seat Utilization approximates occupied seats as the table's full
+  // capacity for its occupied duration — guest headcount per bill isn't
+  // tracked, so this is a time-occupancy proxy, not a true covers-based
+  // seat-utilization figure.
+  const capacityByTable = new Map(tables.map((t) => [t.id, t.capacity || 0]));
+  let occupiedSeatHours = 0;
+  for (const o of closedOrders) {
+    const hours =
+      (new Date(o.updatedAt).getTime() - new Date(o.startedAt).getTime()) /
+      3_600_000;
+    if (hours <= 0 || hours > 12) continue; // guard against bad/anomalous sessions
+    occupiedSeatHours += hours * (capacityByTable.get(o.tableId!) || 0);
+  }
+  const availableSeatHours = totalCapacity * operatingHoursPerDay * periodDays;
+  const seatUtilizationPercentage =
+    availableSeatHours > 0
+      ? Math.min(100, (occupiedSeatHours / availableSeatHours) * 100)
+      : 0;
+
+  return {
+    totalTables,
+    totalCapacity,
+    tablesWithMissingCapacity,
+    periodDays,
+    operatingHoursPerDay,
+    hasOperatingHours,
+    turnoverCount,
+    tableTurnoverRate,
+    turnsPerTablePerDay,
+    seatUtilizationPercentage,
+  };
 };
 
 // ─── getDashboardOverviewDataService (owner/admin view — no restaurant filter) ─

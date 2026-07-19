@@ -37,6 +37,7 @@ export const updateBranchesService = async (body: any) => {
         eveningShiftHours: Number(branch.eveningShiftHours) || 6,
         fullDayShiftHours: Number(branch.fullDayShiftHours) || 10,
         overtimeRateMultiplier: Number(branch.overtimeRateMultiplier) || 1.5,
+        areaSqFt: branch.areaSqFt ? Number(branch.areaSqFt) : null,
         isDeleted: branch.isDeleted ?? false,
       };
 

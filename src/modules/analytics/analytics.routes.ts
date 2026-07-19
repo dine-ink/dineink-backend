@@ -14,6 +14,7 @@ import {
   getStaffProductivity,
   getRevenueForecast,
   getMenuEngineering,
+  getTableOperations,
 } from "./analytics.controller";
 import { authMiddleware } from "../../middleware/auth";
 
@@ -37,5 +38,6 @@ router.get("/:restaurantId/customer-rfm", authMiddleware, getCustomerRFM);
 router.get("/:restaurantId/staff-productivity", authMiddleware, getStaffProductivity);
 router.get("/:restaurantId/revenue-forecast", authMiddleware, getRevenueForecast);
 router.get("/:restaurantId/menu-engineering", authMiddleware, getMenuEngineering);
+router.get("/:restaurantId/:branchId/table-operations", authMiddleware, getTableOperations);
 
 export default router;

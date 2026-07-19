@@ -684,9 +684,30 @@ export const getMenuEngineeringService = async (
     };
   });
 
+  // Category Cost % generalizes "Beverage Cost %" — same ratio (category COGS
+  // ÷ category revenue), applied to whichever category the owner cares about,
+  // not just beverages.
+  const categoryCostMap: Record<string, { cost: number; revenue: number }> = {};
+  for (const i of items) {
+    const cat = i.category || "Uncategorized";
+    if (!categoryCostMap[cat]) categoryCostMap[cat] = { cost: 0, revenue: 0 };
+    categoryCostMap[cat].cost += i.cost * i.quantitySold;
+    categoryCostMap[cat].revenue += i.revenue;
+  }
+  const categoryCostBreakdown = Object.entries(categoryCostMap)
+    .map(([category, d]) => ({
+      category,
+      cost: Math.round(d.cost * 100) / 100,
+      revenue: Math.round(d.revenue * 100) / 100,
+      costPercentage:
+        d.revenue > 0 ? Math.round((d.cost / d.revenue) * 1000) / 10 : 0,
+    }))
+    .sort((a, b) => b.revenue - a.revenue);
+
   return {
     items: classified,
     notSold,
+    categoryCostBreakdown,
     summary: {
       star: classified.filter((i) => i.classification === "STAR").length,
       plowhorse: classified.filter((i) => i.classification === "PLOWHORSE").length,

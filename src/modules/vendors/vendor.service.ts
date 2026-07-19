@@ -1,5 +1,18 @@
 import prisma from "../../config/prisma";
 
+// Whether this branch has ever logged a vendor invoice at all, regardless of
+// payment status — distinguishes "no purchasing data entered" from "invoices
+// exist and are all fully paid" (both look like outstanding = 0 otherwise).
+export const getVendorInvoiceActivityService = async (
+  restaurantId: number,
+  branchId: number,
+) => {
+  const totalInvoiceCount = await prisma.vendorInvoice.count({
+    where: { restaurantId, branchId },
+  });
+  return { totalInvoiceCount, hasAnyInvoices: totalInvoiceCount > 0 };
+};
+
 // ── Vendor Payments ───────────────────────────────────────────────────────────
 
 export const getVendorPaymentsService = async (vendorId: number) => {

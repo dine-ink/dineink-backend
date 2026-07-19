@@ -129,8 +129,14 @@ export const getBranchComparisonService = async (
       gst,
       expenses: expenseTotal,
       labourCost,
+      labourCostPercentage:
+        revenue > 0 ? Math.round((labourCost / revenue) * 1000) / 10 : 0,
       netProfit,
       staffCount: staff?._count.id || 0,
+      revenuePerEmployee:
+        (staff?._count.id || 0) > 0
+          ? Math.round(revenue / (staff?._count.id || 1))
+          : 0,
       totalCustomers,
       repeatCustomers,
       repeatCustomerRate:
@@ -279,8 +285,12 @@ export const getCityComparisonService = async (
       gst: c.gst,
       expenses: c.expenses,
       labourCost: c.labourCost,
+      labourCostPercentage:
+        c.revenue > 0 ? Math.round((c.labourCost / c.revenue) * 1000) / 10 : 0,
       netProfit: c.netProfit,
       staffCount: c.staffCount,
+      revenuePerEmployee:
+        c.staffCount > 0 ? Math.round(c.revenue / c.staffCount) : 0,
       totalCustomers: customers.totalCustomers,
       repeatCustomers: customers.repeatCustomers,
       repeatCustomerRate:
