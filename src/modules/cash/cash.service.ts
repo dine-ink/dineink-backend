@@ -67,6 +67,50 @@ export const openCashSessionService = async (data: {
   });
 };
 
+// Revenue/bill-count/payment-method breakdown for a business day — shown to
+// the cashier alongside the cash reconciliation when closing their session,
+// so closing isn't just "does the drawer match" with no visibility into the
+// shift's actual sales.
+export const getShiftSalesSummaryService = async (
+  branchId: number,
+  businessDate: string,
+) => {
+  const dayStart = new Date(businessDate);
+  dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(businessDate);
+  dayEnd.setHours(23, 59, 59, 999);
+
+  const bills = await prisma.bill.findMany({
+    where: {
+      branchId,
+      status: "PAID",
+      createdAt: { gte: dayStart, lte: dayEnd },
+    },
+    select: { total: true, paymentMethod: true },
+  });
+
+  const totalRevenue = bills.reduce((sum, b) => sum + b.total, 0);
+  const billCount = bills.length;
+
+  const breakdownMap: Record<string, { count: number; amount: number }> = {};
+  for (const b of bills) {
+    const method = (b.paymentMethod || "UNKNOWN").toUpperCase();
+    if (!breakdownMap[method]) breakdownMap[method] = { count: 0, amount: 0 };
+    breakdownMap[method].count += 1;
+    breakdownMap[method].amount += b.total;
+  }
+
+  return {
+    totalRevenue,
+    billCount,
+    avgBillValue: billCount > 0 ? totalRevenue / billCount : 0,
+    paymentBreakdown: Object.entries(breakdownMap).map(([method, d]) => ({
+      method,
+      ...d,
+    })),
+  };
+};
+
 export const closeCashSessionService = async (
   sessionId: number,
   data: {

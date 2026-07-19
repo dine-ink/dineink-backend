@@ -3,6 +3,7 @@ import {
   getCashSessionsService,
   openCashSessionService,
   closeCashSessionService,
+  getShiftSalesSummaryService,
 } from "./cash.service";
 
 export const getCashSessions = async (req: Request, res: Response) => {
@@ -26,6 +27,24 @@ export const openCashSession = async (req: Request, res: Response) => {
   try {
     const data = await openCashSessionService(req.body);
     return res.status(201).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const getShiftSalesSummary = async (req: Request, res: Response) => {
+  try {
+    const branchId = Number(req.params.branchId);
+    const businessDate = req.query.businessDate as string | undefined;
+
+    if (!branchId || !businessDate) {
+      return res
+        .status(400)
+        .json({ success: false, message: "branchId and businessDate are required" });
+    }
+
+    const data = await getShiftSalesSummaryService(branchId, businessDate);
+    return res.status(200).json({ success: true, data });
   } catch (error: any) {
     return res.status(400).json({ success: false, message: error.message });
   }

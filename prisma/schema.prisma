@@ -272,6 +272,7 @@ model BillItem {
   quantity   Int
   price      Float
   total      Float
+  notes      String? // special instructions, carried over from the KOT item
   createdAt  DateTime @default(now())
 
   bill Bill @relation(fields: [billId], references: [id])
@@ -369,6 +370,7 @@ model RunningOrderBatchItem {
   price               Float
   total               Float
   status              String            @default("PENDING")
+  notes               String? // special instructions, e.g. "no onions"
   createdAt           DateTime          @default(now())
   runningOrderBatch   RunningOrderBatch @relation(fields: [runningOrderBatchId], references: [id], onDelete: Cascade)
 }
