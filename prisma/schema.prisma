@@ -59,6 +59,7 @@ model Restaurant {
   ingredientPriceHistories IngredientPriceHistory[]
   dailyStockAudits         DailyStockAudit[]
   sopChecklists            SopChecklist[]
+  addOnGroups              AddOnGroup[]
 
   @@index([ownerId])
 }
@@ -204,9 +205,60 @@ model MenuItem {
   category            Category?            @relation(fields: [categoryId], references: [id])
   menuItemIngredients MenuItemIngredient[]
   sopChecklists       SopChecklist[]
+  addOnGroups         MenuItemAddOnGroup[]
 
   @@index([restaurantId])
   @@index([branchId])
+}
+
+// ─── Add-Ons (modifiers) ──────────────────────────────────────────────────────
+// Reusable, optional/multi-select groups (e.g. "Extra Toppings") defined once
+// per restaurant and attached to whichever menu items they apply to, rather
+// than re-entering the same options ("Extra Cheese ₹40") on every item.
+// Deliberately additive-only pricing — required single-select variants (e.g.
+// Small/Medium/Large, where each size has its own absolute price rather than
+// adding to a base price) are a different pricing model and out of scope here.
+
+model AddOnGroup {
+  id           Int      @id @default(autoincrement())
+  restaurantId Int
+  name         String // e.g. "Extra Toppings"
+  isDeleted    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  restaurant Restaurant           @relation(fields: [restaurantId], references: [id])
+  options    AddOn[]
+  menuItems  MenuItemAddOnGroup[]
+
+  @@index([restaurantId])
+}
+
+model AddOn {
+  id           Int      @id @default(autoincrement())
+  addOnGroupId Int
+  name         String // e.g. "Extra Cheese"
+  price        Float
+  isDeleted    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  addOnGroup AddOnGroup @relation(fields: [addOnGroupId], references: [id], onDelete: Cascade)
+
+  @@index([addOnGroupId])
+}
+
+model MenuItemAddOnGroup {
+  id           Int @id @default(autoincrement())
+  menuItemId   Int
+  addOnGroupId Int
+
+  menuItem   MenuItem   @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  addOnGroup AddOnGroup @relation(fields: [addOnGroupId], references: [id], onDelete: Cascade)
+
+  @@unique([menuItemId, addOnGroupId])
+  @@index([menuItemId])
+  @@index([addOnGroupId])
 }
 
 model Customer {
@@ -275,9 +327,24 @@ model BillItem {
   notes      String? // special instructions, carried over from the KOT item
   createdAt  DateTime @default(now())
 
-  bill Bill @relation(fields: [billId], references: [id])
+  bill   Bill            @relation(fields: [billId], references: [id])
+  addOns BillItemAddOn[]
 
   @@index([billId])
+}
+
+// Snapshots the add-on's name/price at order time so a later price change on
+// AddOn doesn't rewrite the price on a historical bill.
+model BillItemAddOn {
+  id         Int      @id @default(autoincrement())
+  billItemId Int
+  name       String
+  price      Float
+  createdAt  DateTime @default(now())
+
+  billItem BillItem @relation(fields: [billItemId], references: [id], onDelete: Cascade)
+
+  @@index([billItemId])
 }
 
 model RestaurantTable {
@@ -372,7 +439,21 @@ model RunningOrderBatchItem {
   status              String            @default("PENDING")
   notes               String? // special instructions, e.g. "no onions"
   createdAt           DateTime          @default(now())
-  runningOrderBatch   RunningOrderBatch @relation(fields: [runningOrderBatchId], references: [id], onDelete: Cascade)
+  runningOrderBatch   RunningOrderBatch          @relation(fields: [runningOrderBatchId], references: [id], onDelete: Cascade)
+  addOns              RunningOrderBatchItemAddOn[]
+}
+
+// Snapshots the add-on's name/price at order time, same reasoning as BillItemAddOn.
+model RunningOrderBatchItemAddOn {
+  id                      Int      @id @default(autoincrement())
+  runningOrderBatchItemId Int
+  name                    String
+  price                   Float
+  createdAt               DateTime @default(now())
+
+  runningOrderBatchItem RunningOrderBatchItem @relation(fields: [runningOrderBatchItemId], references: [id], onDelete: Cascade)
+
+  @@index([runningOrderBatchItemId])
 }
 
 model Order {

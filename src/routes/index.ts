@@ -15,6 +15,7 @@ import attendanceRoutes from "../modules/attendance/attendance.routes";
 import ordersRoutes from "../modules/orders/orders.routes";
 import vendorRoutes from "../modules/vendors/vendor.routes";
 import sopRoutes from "../modules/sop/sop.routes";
+import addonRoutes from "../modules/addons/addon.routes";
 
 const router = express.Router();
 
@@ -34,5 +35,6 @@ router.use("/attendance", attendanceRoutes);
 router.use("/orders", ordersRoutes);
 router.use("/vendors", vendorRoutes);
 router.use("/sop", sopRoutes);
+router.use("/addons", addonRoutes);
 
 export default router;

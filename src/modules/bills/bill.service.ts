@@ -187,7 +187,7 @@ export const getBillsService = async (
         notes: true,
         createdAt: true,
         customer: { select: { name: true, phone: true } },
-        items: true,
+        items: { include: { addOns: true } },
       },
       orderBy: { createdAt: "desc" },
       take: limit,
@@ -207,7 +207,11 @@ export const getBillsService = async (
         batches: {
           select: {
             items: {
-              select: { id: true, menuItemId: true, itemName: true, quantity: true, price: true, total: true, status: true },
+              select: {
+                id: true, menuItemId: true, itemName: true, quantity: true,
+                price: true, total: true, status: true, notes: true,
+                addOns: true,
+              },
             },
           },
         },

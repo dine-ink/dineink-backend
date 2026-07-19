@@ -12,8 +12,14 @@ export const saveRunningOrderService = async (data: any) => {
   } = data;
 
   const isNotDineIn = orderType !== "DINE_IN";
+  // Add-ons are additive on top of the item's own price (e.g. "+₹40" for
+  // extra cheese) — snapshotted name/price per line so a later price change
+  // on the AddOn doesn't rewrite an already-placed order.
+  const addOnTotal = (item: any) =>
+    (item.addOns || []).reduce((s: number, a: any) => s + (Number(a.price) || 0), 0);
+  const lineTotal = (item: any) => item.quantity * (item.price + addOnTotal(item));
   const batchTotal = items.reduce(
-    (sum: number, item: any) => sum + item.quantity * item.price, 0,
+    (sum: number, item: any) => sum + lineTotal(item), 0,
   );
 
   const [runningOrder] = await Promise.all([
@@ -57,8 +63,16 @@ export const saveRunningOrderService = async (data: any) => {
           itemName:   item.itemName,
           quantity:   item.quantity,
           price:      item.price,
-          total:      item.quantity * item.price,
+          total:      lineTotal(item),
           notes:      item.notes || null,
+          addOns: (item.addOns || []).length
+            ? {
+                create: item.addOns.map((a: any) => ({
+                  name: a.name,
+                  price: Number(a.price) || 0,
+                })),
+              }
+            : undefined,
         })),
       },
     },
@@ -67,7 +81,10 @@ export const saveRunningOrderService = async (data: any) => {
   return prisma.runningOrder.findUnique({
     where: { id: runningOrder.id },
     include: {
-      batches: { include: { items: true }, orderBy: { createdAt: "desc" } },
+      batches: {
+        include: { items: { include: { addOns: true } } },
+        orderBy: { createdAt: "desc" },
+      },
       table: true,
     },
   });
@@ -78,7 +95,7 @@ export const getRunningOrderByTableService = async (tableId: number) => {
   return prisma.runningOrder.findMany({
     where: { tableId, status: "ACTIVE" },
     include: {
-      batches: { include: { items: true }, orderBy: { createdAt: "asc" } },
+      batches: { include: { items: { include: { addOns: true } } }, orderBy: { createdAt: "asc" } },
     },
     orderBy: { createdAt: "asc" },
   });
@@ -100,7 +117,7 @@ export const getAllRunningOrdersService = async (
       ],
     },
     include: {
-      batches: { include: { items: true }, orderBy: { createdAt: "asc" } },
+      batches: { include: { items: { include: { addOns: true } } }, orderBy: { createdAt: "asc" } },
       table: { select: { id: true, name: true } },
     },
     orderBy: { createdAt: "asc" },
@@ -222,12 +239,12 @@ export const closeRunningOrderService = async (data: any) => {
   if (tableId) {
     runningOrders = await prisma.runningOrder.findMany({
       where: { tableId, status: "ACTIVE" },
-      include: { batches: { include: { items: true } } },
+      include: { batches: { include: { items: { include: { addOns: true } } } } },
     });
   } else {
     const single = await prisma.runningOrder.findUnique({
       where: { id: runningOrderId },
-      include: { batches: { include: { items: true } } },
+      include: { batches: { include: { items: { include: { addOns: true } } } } },
     });
     runningOrders = single ? [single] : [];
   }
@@ -304,10 +321,13 @@ export const closeRunningOrderService = async (data: any) => {
             price:      item.price,
             total:      item.total,
             notes:      item.notes,
+            addOns: item.addOns?.length
+              ? { create: item.addOns.map((a: any) => ({ name: a.name, price: a.price })) }
+              : undefined,
           })),
         },
       },
-      include: { customer: true, items: true },
+      include: { customer: true, items: { include: { addOns: true } } },
     });
 
     // Mark running orders as CLOSED unless keepOrderActive is set
