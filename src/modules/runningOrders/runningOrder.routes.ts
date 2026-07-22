@@ -11,6 +11,7 @@ import {
   holdRunningOrder,
   resumeRunningOrder,
   discardRunningOrder,
+  transferTable,
 } from "./runningOrder.controller";
 
 const router = Router();
@@ -25,6 +26,7 @@ router.patch("/:orderId/updateStatus", updateRunningOrderStatus);
 router.patch("/:orderId/hold", holdRunningOrder);
 router.patch("/:orderId/resume", resumeRunningOrder);
 router.delete("/:orderId/discard", discardRunningOrder);
+router.post("/transferTable", transferTable);
 
 // Item-level cancel request flow
 router.patch("/items/:itemId/request-cancel", requestItemCancel);

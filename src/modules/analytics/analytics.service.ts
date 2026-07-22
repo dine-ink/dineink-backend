@@ -188,7 +188,7 @@ export const getDashboardOverviewService = async (
     createdAt: { gte: startDate, lte: endDate },
   };
 
-  const [bills, occupiedTables, branches, menuItemsWithCategory, newCustomersCount, cancelledStats] = await Promise.all([
+  const [bills, occupiedTables, branches, menuItemsWithCategory, newCustomersCount, cancelledStats, refundStats] = await Promise.all([
     prisma.bill.findMany({
       where: billWhere,
       select: billSelect,
@@ -219,6 +219,16 @@ export const getDashboardOverviewService = async (
         createdAt: { gte: startDate, lte: endDate },
       },
       _sum: { total: true },
+      _count: { id: true },
+    }),
+    // Real partial/full refunds logged via BillRefund — combined with the
+    // cancelled-bill proxy above for a fuller "money given back" figure.
+    prisma.billRefund.aggregate({
+      where: {
+        createdAt: { gte: startDate, lte: endDate },
+        bill: { restaurantId, ...branchFilter },
+      },
+      _sum: { amount: true },
       _count: { id: true },
     }),
   ]);
@@ -255,6 +265,8 @@ export const getDashboardOverviewService = async (
     newCustomersCount,
     cancelledTotal: cancelledStats._sum.total || 0,
     cancelledCount: cancelledStats._count.id || 0,
+    refundedTotal: refundStats._sum.amount || 0,
+    refundedCount: refundStats._count.id || 0,
     recentOrders: bills.slice(0, 10),
   };
 

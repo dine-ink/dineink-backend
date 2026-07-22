@@ -4,8 +4,6 @@ import {
   getTodayAttendanceService,
   loginAttendanceService,
   logoutAttendanceService,
-  startBreakService,
-  endBreakService,
   createExpenseService,
   deleteExpenseService,
   getExpensesService,
@@ -62,46 +60,6 @@ export const logoutAttendance = async (req: Request, res: Response) => {
     const attendanceId = Number(req.body.attendanceId);
 
     const data = await logoutAttendanceService(attendanceId);
-
-    return res.status(200).json({
-      success: true,
-      data,
-    });
-  } catch (error: any) {
-    console.log(error);
-
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
-export const startBreak = async (req: Request, res: Response) => {
-  try {
-    const attendanceId = Number(req.body.attendanceId);
-
-    const data = await startBreakService(attendanceId);
-
-    return res.status(200).json({
-      success: true,
-      data,
-    });
-  } catch (error: any) {
-    console.log(error);
-
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
-export const endBreak = async (req: Request, res: Response) => {
-  try {
-    const attendanceId = Number(req.body.attendanceId);
-
-    const data = await endBreakService(attendanceId);
 
     return res.status(200).json({
       success: true,

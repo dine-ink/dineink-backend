@@ -53,6 +53,17 @@ export const openCashSessionService = async (data: {
   businessDate?: string;
   notes?: string;
 }) => {
+  // One open session per cashier at a time (not per branch — a branch can
+  // have several cashiers/tills open concurrently, each with their own
+  // drawer). This replaces the old DB-level "one session per branch per
+  // day" constraint, which would have blocked exactly that.
+  const alreadyOpen = await prisma.dailyCashSession.findFirst({
+    where: { openedById: data.openedById, branchId: data.branchId, status: "OPEN" },
+  });
+  if (alreadyOpen) {
+    throw new Error("You already have an open cash session — close it before opening another.");
+  }
+
   return prisma.dailyCashSession.create({
     data: {
       restaurant: { connect: { id: data.restaurantId } },
@@ -67,24 +78,25 @@ export const openCashSessionService = async (data: {
   });
 };
 
-// Revenue/bill-count/payment-method breakdown for a business day — shown to
-// the cashier alongside the cash reconciliation when closing their session,
-// so closing isn't just "does the drawer match" with no visibility into the
-// shift's actual sales.
-export const getShiftSalesSummaryService = async (
-  branchId: number,
-  businessDate: string,
-) => {
-  const dayStart = new Date(businessDate);
-  dayStart.setHours(0, 0, 0, 0);
-  const dayEnd = new Date(businessDate);
-  dayEnd.setHours(23, 59, 59, 999);
+// Revenue/bill-count/payment-method breakdown for THIS session's own
+// open→(close or now) time window — not the whole business day. With
+// several cashiers potentially holding concurrent sessions on the same
+// branch/day, a whole-day figure would double-count the same sales across
+// every one of their summaries instead of showing each their own shift.
+export const getShiftSalesSummaryService = async (sessionId: number) => {
+  const session = await prisma.dailyCashSession.findUnique({
+    where: { id: sessionId },
+    select: { branchId: true, openedAt: true, closedAt: true },
+  });
+  if (!session) throw new Error("Session not found");
+
+  const windowEnd = session.closedAt ?? new Date();
 
   const bills = await prisma.bill.findMany({
     where: {
-      branchId,
+      branchId: session.branchId,
       status: "PAID",
-      createdAt: { gte: dayStart, lte: dayEnd },
+      createdAt: { gte: session.openedAt, lte: windowEnd },
     },
     select: { total: true, paymentMethod: true },
   });
@@ -123,25 +135,22 @@ export const closeCashSessionService = async (
 ) => {
   const session = await prisma.dailyCashSession.findUnique({
     where: { id: sessionId },
-    select: { openingCash: true, businessDate: true, branchId: true },
+    select: { openingCash: true, openedAt: true, branchId: true },
   });
 
   if (!session) throw new Error("Session not found");
 
-  // Auto-calculate expected cash: opening + all CASH bill totals on that business day
+  // Auto-calculate expected cash: opening + CASH bills during THIS session's
+  // own open→now window — not the whole business day, which would count
+  // another concurrent cashier's cash sales into this drawer's expectation.
   let expectedCash = data.expectedCash;
   if (expectedCash === undefined || expectedCash === null) {
-    const dayStart = new Date(session.businessDate);
-    dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(session.businessDate);
-    dayEnd.setHours(23, 59, 59, 999);
-
     const cashBills = await prisma.bill.aggregate({
       where: {
         branchId: session.branchId,
         paymentMethod: { in: ["CASH", "cash"] },
         status: "PAID",
-        createdAt: { gte: dayStart, lte: dayEnd },
+        createdAt: { gte: session.openedAt, lte: new Date() },
       },
       _sum: { total: true },
     });

@@ -34,16 +34,12 @@ export const openCashSession = async (req: Request, res: Response) => {
 
 export const getShiftSalesSummary = async (req: Request, res: Response) => {
   try {
-    const branchId = Number(req.params.branchId);
-    const businessDate = req.query.businessDate as string | undefined;
-
-    if (!branchId || !businessDate) {
-      return res
-        .status(400)
-        .json({ success: false, message: "branchId and businessDate are required" });
+    const sessionId = Number(req.params.sessionId);
+    if (!sessionId) {
+      return res.status(400).json({ success: false, message: "sessionId is required" });
     }
 
-    const data = await getShiftSalesSummaryService(branchId, businessDate);
+    const data = await getShiftSalesSummaryService(sessionId);
     return res.status(200).json({ success: true, data });
   } catch (error: any) {
     return res.status(400).json({ success: false, message: error.message });

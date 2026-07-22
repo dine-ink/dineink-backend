@@ -5,6 +5,8 @@ import {
   getBranchWiseBillsService,
   getReportBillsService,
   cancelBillService,
+  createBillRefundService,
+  getBillRefundsService,
 } from "./bill.service";
 
 export const createBill = async (req: Request, res: Response) => {
@@ -72,6 +74,32 @@ export const cancelBill = async (req: Request, res: Response) => {
     const billId = Number(req.params.billId);
     const bill = await cancelBillService(billId);
     return res.status(200).json({ success: true, bill });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const createBillRefund = async (req: Request, res: Response) => {
+  try {
+    const billId = Number(req.params.billId);
+    const { amount, reason, createdById } = req.body;
+    const bill = await createBillRefundService(
+      billId,
+      Number(amount),
+      reason,
+      createdById ? Number(createdById) : undefined,
+    );
+    return res.status(200).json({ success: true, bill });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const getBillRefunds = async (req: Request, res: Response) => {
+  try {
+    const billId = Number(req.params.billId);
+    const refunds = await getBillRefundsService(billId);
+    return res.status(200).json({ success: true, data: refunds });
   } catch (error: any) {
     return res.status(400).json({ success: false, message: error.message });
   }

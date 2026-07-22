@@ -300,6 +300,18 @@ model Bill {
   discount    Float
   total       Float
 
+  // Cumulative amount refunded so far (see BillRefund) — `total` is reduced
+  // by each refund directly so revenue aggregations (which just sum `total`)
+  // stay correct without touching every analytics query; this field is only
+  // for display ("how much has been refunded off this bill").
+  refundedAmount Float? @default(0)
+
+  // Deliberately NOT folded into `total` — a tip isn't restaurant revenue
+  // (it's a pass-through to staff), so keeping it separate means every
+  // existing revenue/GST query that sums `total` stays correct unchanged.
+  // The amount actually collected from the guest is `total + tipAmount`.
+  tipAmount Float? @default(0)
+
   notes String?
 
   restaurantId Int
@@ -310,14 +322,49 @@ model Bill {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
-  branch     Branch?    @relation(fields: [branchId], references: [id])
-  customer   Customer?  @relation(fields: [customerId], references: [id])
+  restaurant Restaurant   @relation(fields: [restaurantId], references: [id])
+  branch     Branch?      @relation(fields: [branchId], references: [id])
+  customer   Customer?    @relation(fields: [customerId], references: [id])
   items      BillItem[]
+  refunds    BillRefund[]
 
   @@index([restaurantId])
   @@index([restaurantId, branchId, createdAt])
   @@index([restaurantId, createdAt])
+}
+
+// A single partial (or full) refund against an already-paid Bill. Multiple
+// rows per bill are allowed (e.g. two separate complaints refunded on
+// different days) — this is the audit ledger; Bill.refundedAmount is the
+// running total for quick display.
+model BillRefund {
+  id          Int      @id @default(autoincrement())
+  billId      Int
+  amount      Float
+  reason      String?
+  createdById Int?
+  createdAt   DateTime @default(now())
+
+  bill Bill @relation(fields: [billId], references: [id])
+
+  @@index([billId])
+}
+
+// One row per (branch, financial year) — `lastNumber` is incremented inside
+// the same transaction that creates a Bill, so two simultaneous bills can
+// never receive the same number and there are never gaps, satisfying GST's
+// sequential-invoice-numbering requirement. Indian FY runs Apr 1 – Mar 31;
+// `financialYear` stores the FY's starting calendar year (e.g. "2026" for
+// FY 2026-27).
+model InvoiceSequence {
+  id            Int    @id @default(autoincrement())
+  restaurantId  Int
+  branchId      Int
+  financialYear String
+  lastNumber    Int    @default(0)
+
+  @@unique([branchId, financialYear])
+  @@index([restaurantId])
 }
 
 model BillItem {
@@ -399,6 +446,11 @@ model RunningOrder {
   sgst Float? @default(0)
 
   finalAmount Float? @default(0)
+
+  // Captured at order time for takeaway/online (paid immediately) — carried
+  // through to the eventual Bill.tipAmount when this is later closed/billed.
+  tipAmount Float? @default(0)
+
   // Billing lifecycle: "ACTIVE" while the table is ordering, "CLOSED" once billed.
   status String @default("ACTIVE")
 
@@ -844,9 +896,15 @@ model DailyCashSession {
   restaurant Restaurant @relation(fields: [restaurantId], references: [id])
   branch     Branch     @relation(fields: [branchId], references: [id])
 
-  @@unique([restaurantId, branchId, businessDate])
+  // No longer unique per (branch, day) — a branch can have several
+  // concurrent tills/cashiers, each with their own session on the same
+  // business date. Uniqueness (one open session per cashier at a time) is
+  // enforced in application code instead, since a DB constraint can't say
+  // "unique while status = OPEN" without a partial index this schema
+  // doesn't otherwise use.
   @@index([restaurantId])
   @@index([branchId])
+  @@index([openedById])
 }
 
 model ShopExpense {

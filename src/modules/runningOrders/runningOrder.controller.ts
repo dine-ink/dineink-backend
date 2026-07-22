@@ -11,6 +11,7 @@ import {
   holdRunningOrderService,
   resumeRunningOrderService,
   discardRunningOrderService,
+  transferTableService,
 } from "./runningOrder.service";
 
 export const saveRunningOrder = async (req: Request, res: Response) => {
@@ -119,6 +120,21 @@ export const resumeRunningOrder = async (req: Request, res: Response) => {
   try {
     const orderId = Number(req.params.orderId);
     const response = await resumeRunningOrderService(orderId);
+    return res.status(200).json({ success: true, data: response });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const transferTable = async (req: Request, res: Response) => {
+  try {
+    const { fromTableId, toTableId, restaurantId, branchId } = req.body;
+    const response = await transferTableService(
+      Number(fromTableId),
+      Number(toTableId),
+      Number(restaurantId),
+      Number(branchId),
+    );
     return res.status(200).json({ success: true, data: response });
   } catch (error: any) {
     return res.status(400).json({ success: false, message: error.message });

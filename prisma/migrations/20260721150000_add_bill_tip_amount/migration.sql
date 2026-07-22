@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Bill" ADD COLUMN "tipAmount" DOUBLE PRECISION DEFAULT 0;

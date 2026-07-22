@@ -1,5 +1,6 @@
 import prisma from "../../config/prisma";
 import { invalidateDashboardCache } from "../analytics/analytics.service";
+import { generateBillNo } from "../bills/invoiceNumber.service";
 
 // Fix #1 — always create a fresh RunningOrder per order placement.
 // Each save = one KOT in kitchen.  No more "find existing and add batch".
@@ -8,7 +9,7 @@ export const saveRunningOrderService = async (data: any) => {
     restaurantId, branchId, createdById, tableId, items, orderType,
     customerName, customerPhone, paymentMethod,
     subtotal, discountAmount, packingCharge, serviceCharge,
-    gstAmount, cgst, sgst, finalAmount,
+    gstAmount, cgst, sgst, finalAmount, tipAmount,
   } = data;
 
   const isNotDineIn = orderType !== "DINE_IN";
@@ -42,6 +43,7 @@ export const saveRunningOrderService = async (data: any) => {
         cgst:            isNotDineIn ? cgst            : null,
         sgst:            isNotDineIn ? sgst            : null,
         finalAmount:     isNotDineIn ? finalAmount     : null,
+        tipAmount:       isNotDineIn ? tipAmount        : null,
       },
     }),
     // Mark table OCCUPIED on first dine-in order
@@ -173,11 +175,19 @@ export const updateRunningOrderStatusService = async (
   orderId: number,
   status: string,
 ) => {
+  // kitchenStatus tracks kitchen prep progress; the billing lifecycle
+  // ("ACTIVE" while ordering, "CLOSED" once billed — see
+  // closeRunningOrderService) is a separate concern. Marking the kitchen
+  // READY must NOT also close the order, or it vanishes from both the
+  // Orders page (getBillsService filters status != CLOSED) and the
+  // notification-bell poll (getAllRunningOrdersService only returns CLOSED
+  // orders while kitchenStatus is still PENDING/PREPARING) before staff ever
+  // get to press "Complete".
   return prisma.runningOrder.update({
     where: { id: orderId },
     data: {
       kitchenStatus: status,
-      ...(status === "READY" && { completedAt: new Date(), status: "CLOSED" }),
+      ...(status === "READY" && { completedAt: new Date() }),
     },
   });
 };
@@ -194,6 +204,53 @@ export const resumeRunningOrderService = async (orderId: number) => {
   if (!order) throw new Error("Running order not found");
   if (order.status !== "HELD") throw new Error("Only HELD orders can be resumed");
   return prisma.runningOrder.update({ where: { id: orderId }, data: { status: "ACTIVE" } });
+};
+
+// Moves a table's entire active session (all ACTIVE/HELD orders) to a
+// different, currently-unoccupied table — e.g. a guest group moves seats.
+export const transferTableService = async (
+  fromTableId: number,
+  toTableId: number,
+  restaurantId: number,
+  branchId: number,
+) => {
+  if (fromTableId === toTableId) {
+    throw new Error("Source and destination tables are the same");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    // Lock both table rows (consistent order — lower id first — to avoid a
+    // deadlock if two transfers cross each other) before checking anything,
+    // so two concurrent transfers targeting the same destination serialize
+    // instead of both reading "destination free" and both writing to it.
+    const lockIds = [fromTableId, toTableId].sort((a, b) => a - b);
+    await tx.$executeRaw`SELECT id FROM "RestaurantTable" WHERE id IN (${lockIds[0]}, ${lockIds[1]}) FOR UPDATE`;
+
+    const [fromTable, toTable, activeOrders, destinationBusy] = await Promise.all([
+      tx.restaurantTable.findFirst({ where: { id: fromTableId, restaurantId, branchId } }),
+      tx.restaurantTable.findFirst({ where: { id: toTableId, restaurantId, branchId } }),
+      tx.runningOrder.findMany({
+        where: { tableId: fromTableId, status: { in: ["ACTIVE", "HELD"] } },
+      }),
+      tx.runningOrder.count({
+        where: { tableId: toTableId, status: { in: ["ACTIVE", "HELD"] } },
+      }),
+    ]);
+
+    if (!fromTable) throw new Error("Source table not found");
+    if (!toTable) throw new Error("Destination table not found");
+    if (activeOrders.length === 0) throw new Error("No active order on the source table");
+    if (destinationBusy > 0) throw new Error("Destination table already has an active order");
+
+    await tx.runningOrder.updateMany({
+      where: { id: { in: activeOrders.map((o) => o.id) } },
+      data: { tableId: toTableId },
+    });
+    await tx.restaurantTable.update({ where: { id: toTableId }, data: { status: "OCCUPIED" } });
+    await tx.restaurantTable.update({ where: { id: fromTableId }, data: { status: "AVAILABLE" } });
+
+    return { success: true, movedOrders: activeOrders.length };
+  });
 };
 
 export const discardRunningOrderService = async (orderId: number) => {
@@ -230,7 +287,7 @@ export const closeRunningOrderService = async (data: any) => {
     runningOrderId, tableId,
     customerName, customerPhone, paymentMethod, orderType, orderStatus,
     subtotal, discountAmount, packingCharge, serviceCharge,
-    gstAmount, cgst, sgst, finalAmount,
+    gstAmount, cgst, sgst, finalAmount, tipAmount,
     keepOrderActive,
   } = data;
 
@@ -294,21 +351,28 @@ export const closeRunningOrderService = async (data: any) => {
       });
     }
 
+    const billNo = await generateBillNo(tx, primary.restaurantId, primary.branchId);
     const created = await tx.bill.create({
       data: {
-        billNo: `BILL-${Date.now()}`,
+        billNo,
         restaurantId: primary.restaurantId,
         branchId:     primary.branchId,
         customerId:   customer?.id ?? null,
         status:       paymentMethod ? "PAID" : "UNPAID",
-        subtotal:     subtotal      ?? computedTotal,
-        gst:          gstAmount     ?? 0,
-        cgst:         cgst          ?? 0,
-        sgst:         sgst          ?? 0,
-        discount:     discountAmount ?? 0,
-        serviceCharge: serviceCharge ?? 0,
-        packingCharge: packingCharge ?? 0,
-        total:        finalAmount   ?? computedTotal,
+        // Fall back to whatever this order's own tax/tip breakdown was
+        // (stored at saveRunningOrder time for takeaway/online) before
+        // computedTotal/0 — a caller that just says "close this order" by
+        // id (e.g. Orders page's "Complete" button) doesn't re-send the tax
+        // breakdown, and silently zeroing GST/tip here would be wrong.
+        subtotal:     subtotal      ?? primary.subtotal      ?? computedTotal,
+        gst:          gstAmount     ?? primary.gstAmount      ?? 0,
+        cgst:         cgst          ?? primary.cgst           ?? 0,
+        sgst:         sgst          ?? primary.sgst           ?? 0,
+        discount:     discountAmount ?? primary.discountAmount ?? 0,
+        serviceCharge: serviceCharge ?? primary.serviceCharge ?? 0,
+        packingCharge: packingCharge ?? primary.packingCharge ?? 0,
+        total:        finalAmount   ?? primary.finalAmount    ?? computedTotal,
+        tipAmount:    tipAmount     ?? primary.tipAmount       ?? 0,
         paymentMethod,
         orderType:    orderType     ?? primary.orderType,
         orderStatus:  orderStatus   ?? "COMPLETED",
