@@ -276,7 +276,11 @@ export const getBillsService = async (
       skip: (page - 1) * limit,
     }),
     prisma.runningOrder.findMany({
-      where: { restaurantId, ...branchFilter, status: { not: "CLOSED" } },
+      // Excludes BILLED too — once a quick/takeaway order is invoiced
+      // upfront (see closeRunningOrderService's keepOrderActive), it should
+      // show only via its Bill row here, not also as a lingering
+      // RUNNING_ORDER row while the kitchen finishes preparing it.
+      where: { restaurantId, ...branchFilter, status: { in: ["ACTIVE", "HELD"] } },
       select: {
         id: true,
         orderType: true,

@@ -107,15 +107,16 @@ export const getAllRunningOrdersService = async (
   restaurantId: number,
   branchId: number,
 ) => {
-  // Include ACTIVE orders (dine-in) + CLOSED orders whose kitchen hasn't
-  // fulfilled yet (quick-takeaway: billed immediately but still needs preparing).
+  // Include ACTIVE orders (dine-in) + BILLED orders whose kitchen hasn't
+  // fulfilled yet (quick-takeaway: billed immediately at checkout, but still
+  // needs preparing — see closeRunningOrderService's keepOrderActive).
   const orders = await prisma.runningOrder.findMany({
     where: {
       restaurantId,
       branchId,
       OR: [
         { status: "ACTIVE" },
-        { status: "CLOSED", kitchenStatus: { in: ["PENDING", "PREPARING"] } },
+        { status: "BILLED", kitchenStatus: { in: ["PENDING", "PREPARING"] } },
       ],
     },
     include: {
@@ -176,20 +177,33 @@ export const updateRunningOrderStatusService = async (
   status: string,
 ) => {
   // kitchenStatus tracks kitchen prep progress; the billing lifecycle
-  // ("ACTIVE" while ordering, "CLOSED" once billed — see
-  // closeRunningOrderService) is a separate concern. Marking the kitchen
-  // READY must NOT also close the order, or it vanishes from both the
-  // Orders page (getBillsService filters status != CLOSED) and the
-  // notification-bell poll (getAllRunningOrdersService only returns CLOSED
-  // orders while kitchenStatus is still PENDING/PREPARING) before staff ever
-  // get to press "Complete".
-  return prisma.runningOrder.update({
+  // ("ACTIVE" while ordering, "BILLED" once billed upfront but still
+  // preparing, "CLOSED" once fully done — see closeRunningOrderService) is a
+  // separate concern. Marking the kitchen READY must NOT also close an
+  // ACTIVE (not-yet-billed) order, or it vanishes from both the Orders page
+  // (getBillsService filters out CLOSED/BILLED) and the notification-bell
+  // poll (getAllRunningOrdersService only returns BILLED orders while
+  // kitchenStatus is still PENDING/PREPARING) before staff ever get to press
+  // "Complete".
+  const updated = await prisma.runningOrder.update({
     where: { id: orderId },
     data: {
       kitchenStatus: status,
       ...(status === "READY" && { completedAt: new Date() }),
     },
   });
+
+  // A BILLED order was already invoiced upfront at checkout — there's no
+  // separate "Complete" step waiting for it on the Orders page, so once the
+  // kitchen marks it READY it's fully done and can be closed out here.
+  if (status === "READY" && updated.status === "BILLED") {
+    return prisma.runningOrder.update({
+      where: { id: orderId },
+      data: { status: "CLOSED" },
+    });
+  }
+
+  return updated;
 };
 
 export const holdRunningOrderService = async (orderId: number) => {
@@ -280,8 +294,10 @@ export const discardRunningOrderService = async (orderId: number) => {
 
 // Fix #5 — accept tableId to close ALL active orders for a table at once,
 // or a single runningOrderId for backwards-compat (quick billing).
-// keepOrderActive: true → creates the Bill but does NOT set RunningOrder status=CLOSED,
-// so kitchen still sees the order (used for quick/takeaway where billing is upfront).
+// keepOrderActive: true → creates the Bill but marks the RunningOrder "BILLED"
+// instead of "CLOSED", so kitchen still sees it as needing prep (used for
+// quick/takeaway checkout, where billing happens upfront before the kitchen
+// is done — see getAllRunningOrdersService/updateRunningOrderStatusService).
 export const closeRunningOrderService = async (data: any) => {
   const {
     runningOrderId, tableId,
@@ -394,14 +410,13 @@ export const closeRunningOrderService = async (data: any) => {
       include: { customer: true, items: { include: { addOns: true } } },
     });
 
-    // Mark running orders as CLOSED unless keepOrderActive is set
-    // (quick/takeaway bills upfront but kitchen still needs to prepare)
-    if (!keepOrderActive) {
-      await tx.runningOrder.updateMany({
-        where: { id: { in: runningOrders.map((o) => o.id) } },
-        data: { status: "CLOSED" },
-      });
-    }
+    // Mark running orders CLOSED, or BILLED if keepOrderActive is set
+    // (quick/takeaway bills upfront but kitchen still needs to prepare —
+    // updateRunningOrderStatusService closes it out once kitchen hits READY)
+    await tx.runningOrder.updateMany({
+      where: { id: { in: runningOrders.map((o) => o.id) } },
+      data: { status: keepOrderActive ? "BILLED" : "CLOSED" },
+    });
 
     // ── Auto-deduct ingredients based on MenuItemIngredient mappings ──────────
     const menuItemIds = allItems
