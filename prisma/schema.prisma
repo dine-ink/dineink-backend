@@ -60,6 +60,7 @@ model Restaurant {
   dailyStockAudits         DailyStockAudit[]
   sopChecklists            SopChecklist[]
   addOnGroups              AddOnGroup[]
+  discountCodes            DiscountCode[]
 
   @@index([ownerId])
 }
@@ -187,7 +188,33 @@ model BillingSettings {
   enableDiscount Boolean
   enableTips     Boolean
   paymentMethods String[]
+  // Manual (non-coupon) discounts above this % of the subtotal require a
+  // manager's password to unlock at checkout. Null = use the service-layer
+  // default (20%) rather than forcing every branch to set one explicitly.
+  discountApprovalThreshold Float?
   branch         Branch   @relation(fields: [branchId], references: [id])
+}
+
+// A restaurant-wide coupon/promo code — % or flat-amount off, optionally
+// capped by uses or an expiry date. Applied at checkout in place of (not in
+// addition to) a manual discount.
+model DiscountCode {
+  id           Int       @id @default(autoincrement())
+  restaurantId Int
+  code         String
+  type         String    // "PERCENTAGE" | "FIXED"
+  value        Float
+  isActive     Boolean   @default(true)
+  maxUses      Int?
+  usedCount    Int       @default(0)
+  expiresAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+
+  @@unique([restaurantId, code])
+  @@index([restaurantId])
 }
 
 model MenuItem {
@@ -299,6 +326,15 @@ model Bill {
   gst         Float
   discount    Float
   total       Float
+
+  // Flexible discounts: how `discount` above was derived — a plain manual
+  // percentage (the original behavior), a manual flat ₹ amount, or a coupon
+  // code. discountApprovedById is set when the discount exceeded the
+  // branch's approval threshold and a manager unlocked it (mirrors the
+  // manager-only gate refunds/voids already have).
+  discountType       String? @default("PERCENTAGE")
+  discountCode       String?
+  discountApprovedById Int?
 
   // Cumulative amount refunded so far (see BillRefund) — `total` is reduced
   // by each refund directly so revenue aggregations (which just sum `total`)

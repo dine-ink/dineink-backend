@@ -8,6 +8,7 @@ import {
   requestItemCancelService,
   approveItemCancelService,
   rejectItemCancelService,
+  toggleItemDoneService,
   holdRunningOrderService,
   resumeRunningOrderService,
   discardRunningOrderService,
@@ -101,6 +102,17 @@ export const rejectItemCancel = async (req: Request, res: Response) => {
   try {
     await rejectItemCancelService(Number(req.params.itemId));
     return res.status(200).json({ success: true });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const toggleItemDone = async (req: Request, res: Response) => {
+  try {
+    const itemId = Number(req.params.itemId);
+    const { done } = req.body;
+    const response = await toggleItemDoneService(itemId, !!done);
+    return res.status(200).json({ success: true, data: response });
   } catch (error: any) {
     return res.status(400).json({ success: false, message: error.message });
   }

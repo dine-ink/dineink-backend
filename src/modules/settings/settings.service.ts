@@ -21,6 +21,23 @@ export const getRestaurantSettingsService = async (restaurantId: number) => {
 export const updateBranchesService = async (body: any) => {
   const { restaurantId, branches } = body;
 
+  // Verify every existing branch id in the payload actually belongs to this
+  // restaurant before writing anything — without this, a caller could
+  // rewrite another restaurant's branch (address, GST, shift hours) just by
+  // supplying its numeric id.
+  const existingIds = branches
+    .filter((b: any) => b.id && !b._isNew)
+    .map((b: any) => Number(b.id));
+  if (existingIds.length) {
+    const owned = await prisma.branch.findMany({
+      where: { id: { in: existingIds }, restaurantId },
+      select: { id: true },
+    });
+    if (owned.length !== existingIds.length) {
+      throw new Error("One or more branches do not belong to this restaurant");
+    }
+  }
+
   await Promise.all(
     branches.map((branch: any) => {
       const data = {

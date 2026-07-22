@@ -8,6 +8,31 @@ const MAX_OTP_ATTEMPTS = 5;
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// A large manual discount at checkout needs a manager's say-so — mirrors how
+// refunds/voids are already manager-only, but a discount is entered by
+// whichever cashier is at the register, not necessarily a manager, so this
+// checks a manager's password without swapping the cashier's own session
+// (no new token is issued). Any MANAGER/OWNER in the same restaurant can
+// unlock it — this is a shared-till override, not a personal login.
+export const verifyManagerOverride = async (restaurantId: number, password: string) => {
+  const approvers = await prisma.user.findMany({
+    where: {
+      restaurantId,
+      role: { in: ["MANAGER", "OWNER"] },
+      isActive: true,
+      isDeleted: false,
+    },
+    select: { id: true, name: true, password: true },
+  });
+
+  for (const approver of approvers) {
+    if (await bcrypt.compare(password, approver.password)) {
+      return { approverId: approver.id, approverName: approver.name };
+    }
+  }
+  throw new Error("Incorrect manager password");
+};
+
 export const loginUser = async (identifier: string, password: string) => {
   const user = await prisma.user.findFirst({
     where: {

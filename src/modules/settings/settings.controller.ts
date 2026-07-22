@@ -29,7 +29,13 @@ export const getRestaurantSettings = async (req: Request, res: Response) => {
 
 export const updateBranches = async (req: Request, res: Response) => {
   try {
-    const data = await updateBranchesService(req.body);
+    // Ignore whatever restaurantId the client sent — use the caller's own,
+    // and updateBranchesService verifies every branch.id in the payload
+    // actually belongs to it before writing anything.
+    const data = await updateBranchesService({
+      ...req.body,
+      restaurantId: (req as any).user.restaurantId,
+    });
 
     return res.status(200).json({
       success: true,
@@ -57,11 +63,8 @@ export const updateGeneralSettings = async (req: Request, res: Response) => {
 
 export const createBranch = async (req: Request, res: Response) => {
   try {
-    const { restaurantId, ...data } = req.body;
-    if (!restaurantId) {
-      return res.status(400).json({ success: false, message: "restaurantId is required" });
-    }
-    const branch = await createBranchService(Number(restaurantId), data);
+    // Always the caller's own restaurant — never a client-supplied id.
+    const branch = await createBranchService((req as any).user.restaurantId, req.body);
     return res.status(201).json({ success: true, data: branch });
   } catch (error: any) {
     return res.status(400).json({ success: false, message: error.message });

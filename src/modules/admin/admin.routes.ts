@@ -15,33 +15,37 @@ import {
   updateInventoryAdjustment,
   deleteInventoryAdjustment,
 } from "./admin.controller";
+import { authMiddleware } from "../../middleware/auth";
+import { requireOwnBranch, requireOwnRestaurant } from "../../middleware/authorize";
 
 const router = Router();
 
-router.get("/attendance/:branchId", getTodayAttendance);
+// This entire module had no authMiddleware at all — every route below was
+// reachable by anyone, unauthenticated, for any restaurant/branch.
+router.get("/attendance/:branchId", authMiddleware, requireOwnBranch(), getTodayAttendance);
 
-router.post("/attendance/login", loginAttendance);
+router.post("/attendance/login", authMiddleware, loginAttendance);
 
-router.post("/attendance/logout", logoutAttendance);
+router.post("/attendance/logout", authMiddleware, logoutAttendance);
 
-router.get("/expenses/:branchId", getExpenses);
+router.get("/expenses/:branchId", authMiddleware, requireOwnBranch(), getExpenses);
 
-router.get("/expenses/users/:branchId", getExpenseUsers);
+router.get("/expenses/users/:branchId", authMiddleware, requireOwnBranch(), getExpenseUsers);
 
-router.post("/expenses", createExpense);
+router.post("/expenses", authMiddleware, createExpense);
 
-router.put("/expenses/:id", updateExpense);
+router.put("/expenses/:id", authMiddleware, updateExpense);
 
-router.delete("/expenses/:id", deleteExpense);
-router.get("/inventory/:branchId", getInventoryAdjustments);
+router.delete("/expenses/:id", authMiddleware, deleteExpense);
+router.get("/inventory/:branchId", authMiddleware, requireOwnBranch(), getInventoryAdjustments);
 
-router.get("/inventory/ingredients/:restaurantId", getInventoryIngredients);
+router.get("/inventory/ingredients/:restaurantId", authMiddleware, requireOwnRestaurant(), getInventoryIngredients);
 
-router.get("/inventory/users/:branchId", getInventoryUsers);
+router.get("/inventory/users/:branchId", authMiddleware, requireOwnBranch(), getInventoryUsers);
 
-router.post("/inventory", createInventoryAdjustment);
+router.post("/inventory", authMiddleware, createInventoryAdjustment);
 
-router.put("/inventory/:id", updateInventoryAdjustment);
+router.put("/inventory/:id", authMiddleware, updateInventoryAdjustment);
 
-router.delete("/inventory/:id", deleteInventoryAdjustment);
+router.delete("/inventory/:id", authMiddleware, deleteInventoryAdjustment);
 export default router;

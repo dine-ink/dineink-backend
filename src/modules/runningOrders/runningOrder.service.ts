@@ -1,6 +1,7 @@
 import prisma from "../../config/prisma";
 import { invalidateDashboardCache } from "../analytics/analytics.service";
 import { generateBillNo } from "../bills/invoiceNumber.service";
+import { redeemDiscountCodeInTx } from "../discounts/discount.service";
 
 // Fix #1 — always create a fresh RunningOrder per order placement.
 // Each save = one KOT in kitchen.  No more "find existing and add batch".
@@ -172,6 +173,23 @@ export const rejectItemCancelService = async (itemId: number) => {
   });
 };
 
+// Kitchen-item "done" checkbox used to be tracked purely in each device's
+// local component state, so two KDS tablets viewing the same order kept
+// independent checklists — one station could mark the whole order Ready
+// before another had actually finished its items. Persisting it here on the
+// item row itself gives every device the same source of truth.
+export const toggleItemDoneService = async (itemId: number, done: boolean) => {
+  const item = await prisma.runningOrderBatchItem.findUnique({ where: { id: itemId } });
+  if (!item) throw new Error("Item not found");
+  if (item.status === "CANCELLED" || item.status === "CANCEL_REQUESTED") {
+    throw new Error("Cannot mark a cancelled item done");
+  }
+  return prisma.runningOrderBatchItem.update({
+    where: { id: itemId },
+    data: { status: done ? "DONE" : "PENDING" },
+  });
+};
+
 export const updateRunningOrderStatusService = async (
   orderId: number,
   status: string,
@@ -316,7 +334,7 @@ export const closeRunningOrderService = async (data: any) => {
     customerName, customerPhone, paymentMethod, orderType, orderStatus,
     subtotal, discountAmount, packingCharge, serviceCharge,
     gstAmount, cgst, sgst, finalAmount, tipAmount,
-    keepOrderActive,
+    keepOrderActive, discountType, discountCode, discountApprovedById,
   } = data;
 
   // Resolve which orders to close
@@ -405,6 +423,9 @@ export const closeRunningOrderService = async (data: any) => {
         cgst:         cgst          ?? primary.cgst           ?? 0,
         sgst:         sgst          ?? primary.sgst           ?? 0,
         discount:     discountAmount ?? primary.discountAmount ?? 0,
+        discountType: discountType ?? "PERCENTAGE",
+        discountCode: discountCode ?? null,
+        discountApprovedById: discountApprovedById ?? null,
         serviceCharge: serviceCharge ?? primary.serviceCharge ?? 0,
         packingCharge: packingCharge ?? primary.packingCharge ?? 0,
         total:        finalAmount   ?? primary.finalAmount    ?? computedTotal,
@@ -429,6 +450,10 @@ export const closeRunningOrderService = async (data: any) => {
       },
       include: { customer: true, items: { include: { addOns: true } } },
     });
+
+    if (discountCode) {
+      await redeemDiscountCodeInTx(tx, primary.restaurantId, discountCode);
+    }
 
     // Mark running orders CLOSED, or BILLED if keepOrderActive is set
     // (quick/takeaway bills upfront but kitchen still needs to prepare —

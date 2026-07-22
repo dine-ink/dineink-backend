@@ -72,7 +72,7 @@ export const getBranchWiseBills = async (req: Request, res: Response) => {
 export const cancelBill = async (req: Request, res: Response) => {
   try {
     const billId = Number(req.params.billId);
-    const bill = await cancelBillService(billId);
+    const bill = await cancelBillService(billId, (req as any).user.restaurantId);
     return res.status(200).json({ success: true, bill });
   } catch (error: any) {
     return res.status(400).json({ success: false, message: error.message });
@@ -88,6 +88,7 @@ export const createBillRefund = async (req: Request, res: Response) => {
       Number(amount),
       reason,
       createdById ? Number(createdById) : undefined,
+      (req as any).user.restaurantId,
     );
     return res.status(200).json({ success: true, bill });
   } catch (error: any) {
@@ -98,7 +99,7 @@ export const createBillRefund = async (req: Request, res: Response) => {
 export const getBillRefunds = async (req: Request, res: Response) => {
   try {
     const billId = Number(req.params.billId);
-    const refunds = await getBillRefundsService(billId);
+    const refunds = await getBillRefundsService(billId, (req as any).user.restaurantId);
     return res.status(200).json({ success: true, data: refunds });
   } catch (error: any) {
     return res.status(400).json({ success: false, message: error.message });

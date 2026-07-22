@@ -3,6 +3,7 @@ import { Request, Response } from "express";
 import {
   getCustomersByBranchService,
   getCustomersByRestaurantService,
+  lookupCustomerByPhoneService,
 } from "./customer.service";
 
 export const getCustomersByBranch = async (req: Request, res: Response) => {
@@ -19,6 +20,18 @@ export const getCustomersByBranch = async (req: Request, res: Response) => {
       success: false,
       message: error.message,
     });
+  }
+};
+
+export const lookupCustomerByPhone = async (req: Request, res: Response) => {
+  try {
+    const restaurantId = Number(req.params.restaurantId);
+    const phone = String(req.query.phone || "").trim();
+    if (!phone) return res.status(200).json({ success: true, data: null });
+    const data = await lookupCustomerByPhoneService(restaurantId, phone);
+    return res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
   }
 };
 

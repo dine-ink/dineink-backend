@@ -43,6 +43,26 @@ const UNIT_TABLE: Record<string, UnitInfo> = {
   pcs: { kind: "count", toCanonical: 1 },
   unit: { kind: "count", toCanonical: 1 },
   units: { kind: "count", toCanonical: 1 },
+  clove: { kind: "count", toCanonical: 1 },
+  cloves: { kind: "count", toCanonical: 1 },
+
+  // Cooking-measure volumes — previously unrecognized, which meant recipes
+  // entered in these units silently skipped conversion at save time (see
+  // saveMenuItemMappingData) and stored the raw tsp/tbsp/cup number as if it
+  // were already in Litres, wrecking stock deduction at sale time.
+  tsp: { kind: "volume", toCanonical: 0.00492892 },
+  teaspoon: { kind: "volume", toCanonical: 0.00492892 },
+  teaspoons: { kind: "volume", toCanonical: 0.00492892 },
+  tbsp: { kind: "volume", toCanonical: 0.0147868 },
+  tablespoon: { kind: "volume", toCanonical: 0.0147868 },
+  tablespoons: { kind: "volume", toCanonical: 0.0147868 },
+  cup: { kind: "volume", toCanonical: 0.236588 },
+  cups: { kind: "volume", toCanonical: 0.236588 },
+  // Not a precise measure by nature — approximated as ~0.36g, the common
+  // culinary rule of thumb, rather than left unrecognized (which silently
+  // skipped conversion entirely and was far more wrong).
+  pinch: { kind: "mass", toCanonical: 0.00036 },
+  pinches: { kind: "mass", toCanonical: 0.00036 },
 };
 
 export const classifyUnit = (raw?: string | null): (UnitInfo & { canonical: string }) | null => {

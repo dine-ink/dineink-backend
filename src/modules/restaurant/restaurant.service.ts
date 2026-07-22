@@ -560,10 +560,19 @@ export const updateMenuItemService = async (id: number, data: any) => {
   if (data.prepTime   !== undefined) update.prepTime    = Number(data.prepTime);
   if (data.isAvailable !== undefined) update.isAvailable = Boolean(data.isAvailable);
 
+  // Must mirror the same include as the menu-management list load — that
+  // load includes menuItemIngredients, so if this response omits it,
+  // MenuManagement.tsx's merge-into-local-state silently drops the item's
+  // ingredient mapping (and its food-cost analytics) until a full reload.
   return prisma.menuItem.update({
     where: { id },
     data: update,
-    include: { category: true },
+    include: {
+      category: true,
+      menuItemIngredients: {
+        include: { ingredient: { include: { category: true } } },
+      },
+    },
   });
 };
 

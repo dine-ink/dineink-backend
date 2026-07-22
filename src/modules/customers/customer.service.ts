@@ -47,6 +47,34 @@ export const getCustomersByBranchService = async (
   }));
 };
 
+// Point lookup for checkout — a phone number typed at the register should
+// surface "returning customer, N visits" immediately, without fetching the
+// whole customer list just to find one match.
+export const lookupCustomerByPhoneService = async (restaurantId: number, phone: string) => {
+  const customer = await prisma.customer.findFirst({
+    where: { restaurantId, phone },
+    select: {
+      id: true,
+      name: true,
+      phone: true,
+      bills: {
+        select: { total: true, orderType: true, createdAt: true },
+        orderBy: { createdAt: "desc" },
+      },
+    },
+  });
+  if (!customer) return null;
+
+  const { bills, ...rest } = customer;
+  return {
+    ...rest,
+    visits: bills.length,
+    spend: bills.reduce((sum, bill) => sum + bill.total, 0),
+    lastVisit: bills[0]?.createdAt ?? null,
+    preferredOrderType: bills[0]?.orderType ?? null,
+  };
+};
+
 export const getCustomersByRestaurantService = async (
   restaurantId: number,
   page = 1,

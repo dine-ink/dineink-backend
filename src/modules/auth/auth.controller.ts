@@ -7,6 +7,7 @@ import {
   verifySignupOtpAndCreateUser,
   sendPasswordResetOtp,
   verifyPasswordResetOtpAndSetPassword,
+  verifyManagerOverride,
 } from "./auth.service";
 
 export const login = async (req: Request, res: Response) => {
@@ -121,6 +122,16 @@ export const resetPassword = async (req: Request, res: Response) => {
       success: false,
       message: error.message,
     });
+  }
+};
+
+export const verifyManagerOverrideHandler = async (req: any, res: Response) => {
+  try {
+    const { password } = req.body;
+    const data = await verifyManagerOverride(req.user.restaurantId, password);
+    return res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(401).json({ success: false, message: error.message });
   }
 };
 

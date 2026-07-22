@@ -1,6 +1,7 @@
 import prisma from "../../config/prisma";
 import { invalidateDashboardCache } from "../analytics/analytics.service";
 import { generateBillNo } from "./invoiceNumber.service";
+import { redeemDiscountCodeInTx } from "../discounts/discount.service";
 
 // Creates a Bill directly from an item list — unlike closeRunningOrderService,
 // this never reads a RunningOrder row from the DB, so it works even when the
@@ -14,7 +15,7 @@ export const createBillService = async (data: any) => {
     customerName, customerPhone, branchId, total, paymentMethod, orderType,
     items, restaurantId, cgst, sgst, gst, serviceCharge, packingCharge,
     discount, subtotal, createdById, tableId, orderStatus, runningOrderId,
-    tipAmount,
+    tipAmount, discountType, discountCode, discountApprovedById,
   } = data;
 
   // Parallel: customer lookup and bill creation don't depend on branch query
@@ -98,6 +99,9 @@ export const createBillService = async (data: any) => {
         serviceCharge: serviceCharge ?? 0,
         packingCharge: packingCharge ?? 0,
         discount: discount ?? 0,
+        discountType: discountType ?? "PERCENTAGE",
+        discountCode: discountCode ?? null,
+        discountApprovedById: discountApprovedById ?? null,
         total,
         tipAmount: tipAmount ?? 0,
         paymentMethod,
@@ -119,6 +123,10 @@ export const createBillService = async (data: any) => {
       },
       include: { customer: true, items: { include: { addOns: true } } },
     });
+
+    if (discountCode) {
+      await redeemDiscountCodeInTx(tx, restaurantId, discountCode);
+    }
 
     // ── Auto-deduct ingredients ───────────────────────────────────────────────
     const menuItemIds = items
@@ -329,9 +337,10 @@ export const getBranchWiseBillsService = async (restaurantId: number, branchId: 
 
 // ─── cancelBillService ───────────────────────────────────────────────────────
 
-export const cancelBillService = async (billId: number) => {
+export const cancelBillService = async (billId: number, callerRestaurantId: number) => {
   const bill = await prisma.bill.findUnique({ where: { id: billId } });
   if (!bill) throw new Error("Bill not found");
+  if (bill.restaurantId !== callerRestaurantId) throw new Error("Bill not found");
   if (bill.status === "CANCELLED") throw new Error("Bill is already cancelled");
 
   const updated = await prisma.bill.update({
@@ -357,6 +366,7 @@ export const createBillRefundService = async (
   amount: number,
   reason: string | undefined,
   createdById: number | undefined,
+  callerRestaurantId: number,
 ) => {
   const updated = await prisma.$transaction(async (tx) => {
     // Lock the row before reading — without this, two refunds submitted at
@@ -368,6 +378,7 @@ export const createBillRefundService = async (
     const bill = await tx.bill.findUnique({ where: { id: billId } });
 
     if (!bill) throw new Error("Bill not found");
+    if (bill.restaurantId !== callerRestaurantId) throw new Error("Bill not found");
     if (bill.status === "CANCELLED") throw new Error("Cannot refund a cancelled bill");
     if (!(amount > 0)) throw new Error("Refund amount must be greater than 0");
     if (amount > bill.total) {
@@ -400,7 +411,9 @@ export const createBillRefundService = async (
   return updated;
 };
 
-export const getBillRefundsService = async (billId: number) => {
+export const getBillRefundsService = async (billId: number, callerRestaurantId: number) => {
+  const bill = await prisma.bill.findUnique({ where: { id: billId }, select: { restaurantId: true } });
+  if (!bill || bill.restaurantId !== callerRestaurantId) throw new Error("Bill not found");
   return prisma.billRefund.findMany({
     where: { billId },
     orderBy: { createdAt: "desc" },

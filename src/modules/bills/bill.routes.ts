@@ -8,13 +8,14 @@ import {
   getBillRefunds,
 } from "./bill.controller";
 import { authMiddleware } from "../../middleware/auth";
+import { requireOwnRestaurant } from "../../middleware/authorize";
 
 const router = Router();
 
 router.post("/create", authMiddleware, createBill);
-router.get("/:restaurantId/:branchId/branchwise", authMiddleware, getBranchWiseBills);
+router.get("/:restaurantId/:branchId/branchwise", authMiddleware, requireOwnRestaurant(), getBranchWiseBills);
 // Raw bills with all financial fields — supports ?branchId= ?from= ?to=
-router.get("/:restaurantId/restaurantwise", authMiddleware, getReportBills);
+router.get("/:restaurantId/restaurantwise", authMiddleware, requireOwnRestaurant(), getReportBills);
 router.patch("/:billId/cancel", authMiddleware, cancelBill);
 router.post("/:billId/refund", authMiddleware, createBillRefund);
 router.get("/:billId/refunds", authMiddleware, getBillRefunds);

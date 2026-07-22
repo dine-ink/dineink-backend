@@ -7,6 +7,7 @@ import {
   verifySignupOtpHandler,
   forgotPassword,
   resetPassword,
+  verifyManagerOverrideHandler,
 } from "./auth.controller";
 import { authMiddleware } from "../../middleware/auth";
 
@@ -18,5 +19,6 @@ router.post("/signup/verify-otp", verifySignupOtpHandler);
 router.post("/forgot-password", forgotPassword);
 router.post("/reset-password", resetPassword);
 router.put("/change-password", authMiddleware, changePassword);
+router.post("/verify-manager-override", authMiddleware, verifyManagerOverrideHandler);
 
 export default router;

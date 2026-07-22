@@ -6,10 +6,11 @@ import {
   deleteSopChecklistHandler,
 } from "./sop.controller";
 import { authMiddleware } from "../../middleware/auth";
+import { requireOwnRestaurant } from "../../middleware/authorize";
 
 const router = express.Router();
 
-router.get("/:restaurantId", authMiddleware, getSopChecklistsHandler);
+router.get("/:restaurantId", authMiddleware, requireOwnRestaurant(), getSopChecklistsHandler);
 router.post("/", authMiddleware, createSopChecklistHandler);
 router.put("/:id", authMiddleware, updateSopChecklistHandler);
 router.delete("/:id", authMiddleware, deleteSopChecklistHandler);

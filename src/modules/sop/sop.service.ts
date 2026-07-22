@@ -43,14 +43,23 @@ export const updateSopChecklist = async (
     menuItemId?: number | null;
     isActive?: boolean;
   },
+  callerRestaurantId: number,
 ) => {
+  const existing = await prisma.sopChecklist.findUnique({ where: { id } });
+  if (!existing || existing.restaurantId !== callerRestaurantId) {
+    throw new Error("SOP checklist not found");
+  }
   return prisma.sopChecklist.update({
     where: { id },
     data,
   });
 };
 
-export const deleteSopChecklist = async (id: number) => {
+export const deleteSopChecklist = async (id: number, callerRestaurantId: number) => {
+  const existing = await prisma.sopChecklist.findUnique({ where: { id } });
+  if (!existing || existing.restaurantId !== callerRestaurantId) {
+    throw new Error("SOP checklist not found");
+  }
   return prisma.sopChecklist.update({
     where: { id },
     data: { isActive: false },

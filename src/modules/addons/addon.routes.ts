@@ -13,11 +13,12 @@ import {
   getRestaurantAddOnAttachments,
 } from "./addon.controller";
 import { authMiddleware } from "../../middleware/auth";
+import { requireOwnRestaurant } from "../../middleware/authorize";
 
 const router = Router();
 
 // Groups
-router.get("/groups/:restaurantId", authMiddleware, getAddOnGroups);
+router.get("/groups/:restaurantId", authMiddleware, requireOwnRestaurant(), getAddOnGroups);
 router.post("/groups", authMiddleware, createAddOnGroup);
 router.put("/groups/:id", authMiddleware, updateAddOnGroup);
 router.delete("/groups/:id", authMiddleware, deleteAddOnGroup);
@@ -28,7 +29,7 @@ router.put("/options/:id", authMiddleware, updateAddOn);
 router.delete("/options/:id", authMiddleware, deleteAddOn);
 
 // Bulk map of menuItemId -> attached groups, for POS menu prefetch
-router.get("/restaurant/:restaurantId/attachments", authMiddleware, getRestaurantAddOnAttachments);
+router.get("/restaurant/:restaurantId/attachments", authMiddleware, requireOwnRestaurant(), getRestaurantAddOnAttachments);
 
 // Attaching groups to menu items
 router.get("/menu-items/:menuItemId", authMiddleware, getMenuItemAddOnGroups);

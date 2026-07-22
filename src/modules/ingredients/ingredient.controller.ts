@@ -11,7 +11,7 @@ import {
 
 export const generateIngredients = async (req: any, res: any) => {
   try {
-    const { restaurantId } = req.body;
+    const restaurantId = req.user.restaurantId;
     const data = await ingredientService.generateIngredients(restaurantId);
     res.json({
       success: true,
@@ -28,9 +28,9 @@ export const generateIngredients = async (req: any, res: any) => {
 
 export const saveIngredients = async (req: any, res: any) => {
   try {
-    const { restaurantId, branchId, ingredients } = req.body;
+    const { branchId, ingredients } = req.body;
     const data = await ingredientService.saveIngredients(
-      restaurantId,
+      req.user.restaurantId,
       branchId,
       ingredients,
     );
@@ -105,9 +105,9 @@ export const aiSuggestMapping = async (req: any, res: any) => {
 
 export const uploadVendors = async (req: any, res: any) => {
   try {
-    const { restaurantId, branchId, vendors } = req.body;
+    const { branchId, vendors } = req.body;
 
-    await ingredientService.uploadVendors(restaurantId, branchId, vendors);
+    await ingredientService.uploadVendors(req.user.restaurantId, branchId, vendors);
 
     res.json({
       success: true,
@@ -136,7 +136,8 @@ export const getVendors = async (req: Request, res: Response) => {
 
 export const createVendorHandler = async (req: Request, res: Response) => {
   try {
-    const vendor = await createVendor(req.body);
+    // Force the caller's own restaurantId — never a client-supplied one.
+    const vendor = await createVendor({ ...req.body, restaurantId: (req as any).user.restaurantId });
     return res.status(201).json({ success: true, data: vendor });
   } catch (err) {
     console.log(err);
@@ -147,39 +148,48 @@ export const createVendorHandler = async (req: Request, res: Response) => {
 export const updateVendorHandler = async (req: Request, res: Response) => {
   try {
     const id = Number(req.params.id);
-    const vendor = await updateVendor(id, req.body);
+    const vendor = await updateVendor(id, req.body, (req as any).user.restaurantId);
     return res.json({ success: true, data: vendor });
-  } catch (err) {
+  } catch (err: any) {
     console.log(err);
-    return res.status(500).json({ success: false, message: "Failed to update vendor" });
+    return res.status(err.message === "Vendor not found" ? 404 : 500).json({
+      success: false,
+      message: err.message || "Failed to update vendor",
+    });
   }
 };
 
 export const deleteVendorHandler = async (req: Request, res: Response) => {
   try {
     const id = Number(req.params.id);
-    await deleteVendor(id);
+    await deleteVendor(id, (req as any).user.restaurantId);
     return res.json({ success: true });
-  } catch (err) {
+  } catch (err: any) {
     console.log(err);
-    return res.status(500).json({ success: false, message: "Failed to delete vendor" });
+    return res.status(err.message === "Vendor not found" ? 404 : 500).json({
+      success: false,
+      message: err.message || "Failed to delete vendor",
+    });
   }
 };
 
 export const updateIngredientPriceHandler = async (req: Request, res: Response) => {
   try {
-    const data = await updateIngredientPrice(req.body);
+    const data = await updateIngredientPrice({ ...req.body, restaurantId: (req as any).user.restaurantId });
     return res.json({ success: true, data });
-  } catch (err) {
+  } catch (err: any) {
     console.log(err);
-    return res.status(500).json({ success: false, message: "Failed to update price" });
+    return res.status(err.message === "Ingredient not found" ? 404 : 500).json({
+      success: false,
+      message: err.message || "Failed to update price",
+    });
   }
 };
 
 export const getIngredientPriceHistoryHandler = async (req: Request, res: Response) => {
   try {
     const ingredientId = Number(req.params.ingredientId);
-    const data = await getIngredientPriceHistory(ingredientId);
+    const data = await getIngredientPriceHistory(ingredientId, (req as any).user.restaurantId);
     return res.json({ success: true, data });
   } catch (err) {
     console.log(err);
@@ -190,10 +200,13 @@ export const getIngredientPriceHistoryHandler = async (req: Request, res: Respon
 export const getIngredientsByVendorHandler = async (req: Request, res: Response) => {
   try {
     const vendorId = Number(req.params.vendorId);
-    const data = await getIngredientsByVendor(vendorId);
+    const data = await getIngredientsByVendor(vendorId, (req as any).user.restaurantId);
     return res.json({ success: true, data });
-  } catch (err) {
+  } catch (err: any) {
     console.log(err);
-    return res.status(500).json({ success: false, message: "Failed to fetch vendor ingredients" });
+    return res.status(err.message === "Vendor not found" ? 404 : 500).json({
+      success: false,
+      message: err.message || "Failed to fetch vendor ingredients",
+    });
   }
 };

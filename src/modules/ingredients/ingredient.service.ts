@@ -375,16 +375,29 @@ export const createVendor = async (data: {
 export const updateVendor = async (
   id: number,
   data: { name?: string; address?: string; phone?: string; email?: string },
+  callerRestaurantId: number,
 ) => {
+  const existing = await prisma.vendor.findUnique({ where: { id } });
+  if (!existing || existing.restaurantId !== callerRestaurantId) {
+    throw new Error("Vendor not found");
+  }
   return prisma.vendor.update({ where: { id }, data });
 };
 
-export const deleteVendor = async (id: number) => {
+export const deleteVendor = async (id: number, callerRestaurantId: number) => {
+  const existing = await prisma.vendor.findUnique({ where: { id } });
+  if (!existing || existing.restaurantId !== callerRestaurantId) {
+    throw new Error("Vendor not found");
+  }
   await prisma.ingredientVendor.deleteMany({ where: { vendorId: id } });
   return prisma.vendor.delete({ where: { id } });
 };
 
-export const getIngredientsByVendor = async (vendorId: number) => {
+export const getIngredientsByVendor = async (vendorId: number, callerRestaurantId: number) => {
+  const vendor = await prisma.vendor.findUnique({ where: { id: vendorId } });
+  if (!vendor || vendor.restaurantId !== callerRestaurantId) {
+    throw new Error("Vendor not found");
+  }
   const rows = await prisma.ingredientVendor.findMany({
     where: { vendorId },
     include: { ingredient: { include: { category: true } } },
@@ -412,8 +425,11 @@ export const updateIngredientPrice = async (data: {
 }) => {
   const ingredient = await prisma.ingredient.findUnique({
     where: { id: data.ingredientId },
-    select: { pricePerUnit: true },
+    select: { pricePerUnit: true, restaurantId: true },
   });
+  if (!ingredient || ingredient.restaurantId !== data.restaurantId) {
+    throw new Error("Ingredient not found");
+  }
 
   await prisma.ingredientPriceHistory.create({
     data: {
@@ -433,9 +449,13 @@ export const updateIngredientPrice = async (data: {
 
 export const getIngredientPriceHistory = async (
   ingredientId: number,
+  callerRestaurantId: number,
 ) => {
   return prisma.ingredientPriceHistory.findMany({
-    where:   { ingredientId },
+    // restaurantId is stamped on every history row at creation time — scoping
+    // the read here means a caller can't page through another restaurant's
+    // price history just by guessing ingredientIds.
+    where:   { ingredientId, restaurantId: callerRestaurantId },
     orderBy: { createdAt: "desc" },
   });
 };

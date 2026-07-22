@@ -16,6 +16,7 @@ import ordersRoutes from "../modules/orders/orders.routes";
 import vendorRoutes from "../modules/vendors/vendor.routes";
 import sopRoutes from "../modules/sop/sop.routes";
 import addonRoutes from "../modules/addons/addon.routes";
+import discountRoutes from "../modules/discounts/discount.routes";
 
 const router = express.Router();
 
@@ -36,5 +37,6 @@ router.use("/orders", ordersRoutes);
 router.use("/vendors", vendorRoutes);
 router.use("/sop", sopRoutes);
 router.use("/addons", addonRoutes);
+router.use("/discounts", discountRoutes);
 
 export default router;
