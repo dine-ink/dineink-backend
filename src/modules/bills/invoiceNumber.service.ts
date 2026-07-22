@@ -21,5 +21,10 @@ export const generateBillNo = async (
     create: { restaurantId, branchId, financialYear, lastNumber: 1 },
     update: { lastNumber: { increment: 1 } },
   });
-  return `INV-${financialYear}-${String(seq.lastNumber).padStart(6, "0")}`;
+  // branchId is embedded in the number itself, not just tracked in
+  // InvoiceSequence — without it, two branches both issuing their "bill #1"
+  // in the same financial year produce the identical string, which then
+  // collides against Bill.billNo's *global* unique constraint the moment a
+  // restaurant has more than one branch.
+  return `INV-${financialYear}-B${branchId}-${String(seq.lastNumber).padStart(6, "0")}`;
 };
