@@ -451,8 +451,16 @@ model RunningOrder {
   // through to the eventual Bill.tipAmount when this is later closed/billed.
   tipAmount Float? @default(0)
 
-  // Billing lifecycle: "ACTIVE" while the table is ordering, "CLOSED" once billed.
+  // Billing lifecycle: "ACTIVE" while the table is ordering, "BILLED" once
+  // invoiced upfront but still preparing (quick/takeaway), "CLOSED" once done.
   status String @default("ACTIVE")
+
+  // Set when this order is billed upfront (see closeRunningOrderService's
+  // keepOrderActive) — lets the kitchen-complete flow flip the matching
+  // Bill's orderStatus from "CONFIRMED" to "COMPLETED" without touching any
+  // financial fields. No enforced FK — same loose-coupling pattern as this
+  // model's other cross-entity ids (menuItemId, createdById).
+  billId Int?
 
   // KITCHEN STATUS
   kitchenStatus String @default("PENDING")

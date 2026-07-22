@@ -195,12 +195,24 @@ export const updateRunningOrderStatusService = async (
 
   // A BILLED order was already invoiced upfront at checkout — there's no
   // separate "Complete" step waiting for it on the Orders page, so once the
-  // kitchen marks it READY it's fully done and can be closed out here.
+  // kitchen marks it READY it's fully done and can be closed out here. The
+  // linked Bill's orderStatus flips "CONFIRMED" → "COMPLETED" so the Orders
+  // page reflects that the dish actually got made — no other Bill field
+  // (totals, payment, etc.) is touched, since none of that changed.
   if (status === "READY" && updated.status === "BILLED") {
-    return prisma.runningOrder.update({
-      where: { id: orderId },
-      data: { status: "CLOSED" },
-    });
+    const [closed] = await Promise.all([
+      prisma.runningOrder.update({
+        where: { id: orderId },
+        data: { status: "CLOSED" },
+      }),
+      updated.billId
+        ? prisma.bill.update({
+            where: { id: updated.billId },
+            data: { orderStatus: "COMPLETED" },
+          })
+        : Promise.resolve(null),
+    ]);
+    return closed;
   }
 
   return updated;
@@ -319,6 +331,14 @@ export const closeRunningOrderService = async (data: any) => {
       where: { id: runningOrderId },
       include: { batches: { include: { items: { include: { addOns: true } } } } },
     });
+    // Without this check, clicking "Complete" twice in a row (e.g. a
+    // double-click, or the row not disappearing before a second click) would
+    // read this same still-there row again and create a second Bill for it —
+    // the tableId branch above is naturally guarded by its status:"ACTIVE"
+    // filter, but findUnique-by-id has no such filter, so it's checked here.
+    if (single && single.status !== "ACTIVE") {
+      throw new Error("This order has already been billed.");
+    }
     runningOrders = single ? [single] : [];
   }
 
@@ -412,10 +432,11 @@ export const closeRunningOrderService = async (data: any) => {
 
     // Mark running orders CLOSED, or BILLED if keepOrderActive is set
     // (quick/takeaway bills upfront but kitchen still needs to prepare —
-    // updateRunningOrderStatusService closes it out once kitchen hits READY)
+    // updateRunningOrderStatusService closes it out once kitchen hits READY,
+    // using billId to flip this same Bill's orderStatus to "COMPLETED")
     await tx.runningOrder.updateMany({
       where: { id: { in: runningOrders.map((o) => o.id) } },
-      data: { status: keepOrderActive ? "BILLED" : "CLOSED" },
+      data: { status: keepOrderActive ? "BILLED" : "CLOSED", billId: created.id },
     });
 
     // ── Auto-deduct ingredients based on MenuItemIngredient mappings ──────────
