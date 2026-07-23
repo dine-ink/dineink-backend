@@ -1062,3 +1062,50 @@ model SopChecklist {
   @@index([branchId])
   @@index([menuItemId])
 }
+
+enum ProcurementAvailability {
+  IN_STOCK
+  LIMITED_STOCK
+  OUT_OF_STOCK
+  UNKNOWN
+}
+
+// External supplier platforms compared by Procurement Intelligence
+// (Hyperpure, Zepto Business, Instamart, ...). Distinct from Vendor, which
+// tracks a restaurant's own real-world suppliers for payments/invoices.
+model Supplier {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  displayName String
+  isActive    Boolean  @default(true)
+  iconUrl     String?
+  createdAt   DateTime @default(now())
+
+  snapshots ProcurementPriceSnapshot[]
+}
+
+// A single price observation for a search term on one supplier at a point in
+// time. Cached/keyed by (supplierId, searchTerm, city) rather than per
+// restaurant, since the same supplier's public catalog price is shared across
+// every restaurant in the same city — capturedByRestaurantId is attribution
+// only, not a scoping key.
+model ProcurementPriceSnapshot {
+  id                     Int                     @id @default(autoincrement())
+  supplierId             Int
+  searchTerm             String
+  city                   String?
+  productName            String
+  price                  Float
+  unit                   String
+  availability           ProcurementAvailability @default(UNKNOWN)
+  currency               String                  @default("INR")
+  sourceUrl              String?
+  capturedByRestaurantId Int?
+  capturedAt             DateTime                @default(now())
+  createdAt              DateTime                @default(now())
+
+  supplier Supplier @relation(fields: [supplierId], references: [id])
+
+  @@index([supplierId, searchTerm, city])
+  @@index([searchTerm, capturedAt])
+}
