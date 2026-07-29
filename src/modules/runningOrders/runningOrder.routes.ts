@@ -19,11 +19,11 @@ import { requireOwnRestaurant } from "../../middleware/authorize";
 
 const router = Router();
 
-// This entire module had no authMiddleware at all — order placement, table
-// transfer, and bill-creating "closeRunningOrder" were all reachable by
-// anyone, unauthenticated. The item-id/order-id-based routes below still
-// have no ownership check (that would need a per-row restaurantId lookup,
-// same as the SOP/vendor fixes elsewhere) — flagged as a residual gap.
+// Every route below requires authMiddleware, and every mutation is
+// ownership-checked in its service function (fetch-then-compare against the
+// caller's own restaurantId, same pattern as restaurant/admin/vendor/cash) —
+// none of them carry restaurantId as a URL param, so there's nothing for
+// requireOwnRestaurant()/requireOwnBranch() to check at the route level.
 router.post("/saveRunningOrder", authMiddleware, saveRunningOrder);
 router.get("/:tableId/runningOrdertable", authMiddleware, getRunningOrderByTable);
 router.post("/closeRunningOrder", authMiddleware, closeRunningOrder);

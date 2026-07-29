@@ -2,16 +2,56 @@ import prisma from "../../config/prisma";
 import { invalidateDashboardCache } from "../analytics/analytics.service";
 import { generateBillNo } from "../bills/invoiceNumber.service";
 import { redeemDiscountCodeInTx } from "../discounts/discount.service";
+import { ForbiddenError } from "./runningOrder.validation";
+
+// Fetch-then-compare ownership check for any mutation targeting a running
+// order directly by its own id (the route carries no restaurantId).
+const getOwnedRunningOrder = async (callerRestaurantId: number, orderId: number) => {
+  const order = await prisma.runningOrder.findUnique({ where: { id: orderId } });
+  if (!order) throw new Error("Running order not found");
+  if (order.restaurantId !== callerRestaurantId) {
+    throw new ForbiddenError("You do not have access to this running order");
+  }
+  return order;
+};
+
+// Same check for the item-level cancel/toggle flow, which only ever
+// receives an itemId — hops itemId -> batch -> runningOrder to find the
+// owning restaurant. Returns the item with the batch/runningOrder relation
+// already loaded so callers don't need a second fetch.
+const getOwnedBatchItem = async (callerRestaurantId: number, itemId: number) => {
+  const item = await prisma.runningOrderBatchItem.findUnique({
+    where: { id: itemId },
+    include: { runningOrderBatch: { include: { runningOrder: true } } },
+  });
+  if (!item) throw new Error("Item not found");
+  if (item.runningOrderBatch.runningOrder.restaurantId !== callerRestaurantId) {
+    throw new ForbiddenError("You do not have access to this order item");
+  }
+  return item;
+};
 
 // Fix #1 — always create a fresh RunningOrder per order placement.
 // Each save = one KOT in kitchen.  No more "find existing and add batch".
-export const saveRunningOrderService = async (data: any) => {
+export const saveRunningOrderService = async (callerRestaurantId: number, data: any) => {
   const {
-    restaurantId, branchId, createdById, tableId, items, orderType,
+    branchId, createdById, tableId, items, orderType,
     customerName, customerPhone, paymentMethod,
     subtotal, discountAmount, packingCharge, serviceCharge,
     gstAmount, cgst, sgst, finalAmount, tipAmount,
   } = data;
+  const restaurantId = callerRestaurantId;
+
+  const branch = await prisma.branch.findUnique({ where: { id: Number(branchId) }, select: { restaurantId: true } });
+  if (!branch || branch.restaurantId !== callerRestaurantId) {
+    throw new ForbiddenError("You do not have access to this branch");
+  }
+  if (tableId) {
+    const table = await prisma.restaurantTable.findUnique({ where: { id: Number(tableId) }, select: { restaurantId: true, branchId: true } });
+    if (!table || table.restaurantId !== callerRestaurantId || table.branchId !== Number(branchId)) {
+      throw new ForbiddenError("You do not have access to this table");
+    }
+  }
 
   const isNotDineIn = orderType !== "DINE_IN";
   // Add-ons are additive on top of the item's own price (e.g. "+₹40" for
@@ -94,9 +134,12 @@ export const saveRunningOrderService = async (data: any) => {
 };
 
 // Fix #3 — return ALL active orders for a table (array, not single record)
-export const getRunningOrderByTableService = async (tableId: number) => {
+export const getRunningOrderByTableService = async (callerRestaurantId: number, tableId: number) => {
   return prisma.runningOrder.findMany({
-    where: { tableId, status: "ACTIVE" },
+    // Scoped by restaurantId directly, same as getIngredientPriceHistory's
+    // pattern — a caller can't page through another restaurant's orders
+    // just by guessing tableIds.
+    where: { tableId, restaurantId: callerRestaurantId, status: "ACTIVE" },
     include: {
       batches: { include: { items: { include: { addOns: true } } }, orderBy: { createdAt: "asc" } },
     },
@@ -136,23 +179,16 @@ export const getAllRunningOrdersService = async (
 
 // ── Item-level cancel request flow ──────────────────────────────────────────
 
-export const requestItemCancelService = async (itemId: number) => {
+export const requestItemCancelService = async (callerRestaurantId: number, itemId: number) => {
+  await getOwnedBatchItem(callerRestaurantId, itemId);
   return prisma.runningOrderBatchItem.update({
     where: { id: itemId },
     data: { status: "CANCEL_REQUESTED" },
   });
 };
 
-export const approveItemCancelService = async (itemId: number) => {
-  const item = await prisma.runningOrderBatchItem.findUnique({
-    where: { id: itemId },
-  });
-  if (!item) throw new Error("Item not found");
-
-  const batch = await prisma.runningOrderBatch.findUnique({
-    where: { id: item.runningOrderBatchId },
-  });
-  if (!batch) throw new Error("Batch not found");
+export const approveItemCancelService = async (callerRestaurantId: number, itemId: number) => {
+  const item = await getOwnedBatchItem(callerRestaurantId, itemId);
 
   await prisma.$transaction([
     prisma.runningOrderBatchItem.update({
@@ -160,13 +196,14 @@ export const approveItemCancelService = async (itemId: number) => {
       data: { status: "CANCELLED" },
     }),
     prisma.runningOrder.update({
-      where: { id: batch.runningOrderId },
+      where: { id: item.runningOrderBatch.runningOrderId },
       data: { totalAmount: { decrement: item.total } },
     }),
   ]);
 };
 
-export const rejectItemCancelService = async (itemId: number) => {
+export const rejectItemCancelService = async (callerRestaurantId: number, itemId: number) => {
+  await getOwnedBatchItem(callerRestaurantId, itemId);
   return prisma.runningOrderBatchItem.update({
     where: { id: itemId },
     data: { status: "PENDING" },
@@ -178,9 +215,8 @@ export const rejectItemCancelService = async (itemId: number) => {
 // independent checklists — one station could mark the whole order Ready
 // before another had actually finished its items. Persisting it here on the
 // item row itself gives every device the same source of truth.
-export const toggleItemDoneService = async (itemId: number, done: boolean) => {
-  const item = await prisma.runningOrderBatchItem.findUnique({ where: { id: itemId } });
-  if (!item) throw new Error("Item not found");
+export const toggleItemDoneService = async (callerRestaurantId: number, itemId: number, done: boolean) => {
+  const item = await getOwnedBatchItem(callerRestaurantId, itemId);
   if (item.status === "CANCELLED" || item.status === "CANCEL_REQUESTED") {
     throw new Error("Cannot mark a cancelled item done");
   }
@@ -191,9 +227,12 @@ export const toggleItemDoneService = async (itemId: number, done: boolean) => {
 };
 
 export const updateRunningOrderStatusService = async (
+  callerRestaurantId: number,
   orderId: number,
   status: string,
 ) => {
+  await getOwnedRunningOrder(callerRestaurantId, orderId);
+
   // kitchenStatus tracks kitchen prep progress; the billing lifecycle
   // ("ACTIVE" while ordering, "BILLED" once billed upfront but still
   // preparing, "CLOSED" once fully done — see closeRunningOrderService) is a
@@ -236,16 +275,14 @@ export const updateRunningOrderStatusService = async (
   return updated;
 };
 
-export const holdRunningOrderService = async (orderId: number) => {
-  const order = await prisma.runningOrder.findUnique({ where: { id: orderId } });
-  if (!order) throw new Error("Running order not found");
+export const holdRunningOrderService = async (callerRestaurantId: number, orderId: number) => {
+  const order = await getOwnedRunningOrder(callerRestaurantId, orderId);
   if (order.status !== "ACTIVE") throw new Error("Only ACTIVE orders can be held");
   return prisma.runningOrder.update({ where: { id: orderId }, data: { status: "HELD" } });
 };
 
-export const resumeRunningOrderService = async (orderId: number) => {
-  const order = await prisma.runningOrder.findUnique({ where: { id: orderId } });
-  if (!order) throw new Error("Running order not found");
+export const resumeRunningOrderService = async (callerRestaurantId: number, orderId: number) => {
+  const order = await getOwnedRunningOrder(callerRestaurantId, orderId);
   if (order.status !== "HELD") throw new Error("Only HELD orders can be resumed");
   return prisma.runningOrder.update({ where: { id: orderId }, data: { status: "ACTIVE" } });
 };
@@ -297,9 +334,8 @@ export const transferTableService = async (
   });
 };
 
-export const discardRunningOrderService = async (orderId: number) => {
-  const order = await prisma.runningOrder.findUnique({ where: { id: orderId } });
-  if (!order) throw new Error("Running order not found");
+export const discardRunningOrderService = async (callerRestaurantId: number, orderId: number) => {
+  const order = await getOwnedRunningOrder(callerRestaurantId, orderId);
 
   await prisma.$transaction(async (tx) => {
     // Cascade deletes batches + items via onDelete: Cascade on the schema
@@ -328,7 +364,7 @@ export const discardRunningOrderService = async (orderId: number) => {
 // instead of "CLOSED", so kitchen still sees it as needing prep (used for
 // quick/takeaway checkout, where billing happens upfront before the kitchen
 // is done — see getAllRunningOrdersService/updateRunningOrderStatusService).
-export const closeRunningOrderService = async (data: any) => {
+export const closeRunningOrderService = async (callerRestaurantId: number, data: any) => {
   const {
     runningOrderId, tableId,
     customerName, customerPhone, paymentMethod, orderType, orderStatus,
@@ -363,6 +399,13 @@ export const closeRunningOrderService = async (data: any) => {
   if (!runningOrders.length) throw new Error("Running order not found");
 
   const primary = runningOrders[0];
+  // A tableId lookup can only ever return orders from that one table, whose
+  // restaurantId is checked here too — this single check covers both
+  // resolution branches, since every order sharing a tableId inherently
+  // shares its restaurantId.
+  if (primary.restaurantId !== callerRestaurantId) {
+    throw new ForbiddenError("You do not have access to this order");
+  }
   const allItems = runningOrders.flatMap((o) =>
     o.batches.flatMap((b: any) => b.items),
   ).filter((item: any) => item.status !== "CANCELLED");

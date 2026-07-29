@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import { Response } from "express";
 import {
   saveRunningOrderService,
   getRunningOrderByTableService,
@@ -14,128 +14,127 @@ import {
   discardRunningOrderService,
   transferTableService,
 } from "./runningOrder.service";
+import { ForbiddenError } from "./runningOrder.validation";
+
+const handleError = (error: any, res: Response) => {
+  if (error instanceof ForbiddenError) {
+    return res.status(403).json({ success: false, message: error.message });
+  }
+  return res.status(400).json({ success: false, message: error.message });
+};
 
 export const saveRunningOrder = async (req: any, res: Response) => {
   try {
-    // Never trust a client-supplied restaurantId — force the caller's own.
-    const response = await saveRunningOrderService({ ...req.body, restaurantId: req.user.restaurantId });
+    const response = await saveRunningOrderService(Number(req.user.restaurantId), req.body);
     return res.status(201).json({ success: true, data: response });
   } catch (error: any) {
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
+    return handleError(error, res);
   }
 };
 
-export const getRunningOrderByTable = async (req: Request, res: Response) => {
+export const getRunningOrderByTable = async (req: any, res: Response) => {
   try {
     const tableId = Number(req.params.tableId);
-    const response = await getRunningOrderByTableService(tableId);
+    const response = await getRunningOrderByTableService(Number(req.user.restaurantId), tableId);
     return res.status(200).json({
       success: true,
       data: response,
     });
   } catch (error: any) {
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
+    return handleError(error, res);
   }
 };
 
-export const closeRunningOrder = async (req: Request, res: Response) => {
+export const closeRunningOrder = async (req: any, res: Response) => {
   try {
-    const response = await closeRunningOrderService(req.body);
+    const response = await closeRunningOrderService(Number(req.user.restaurantId), req.body);
     return res.status(200).json({
       success: true,
       data: response,
     });
   } catch (error: any) {
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
+    return handleError(error, res);
   }
 };
 
-export const getAllRunningOrders = async (req: Request, res: Response) => {
+export const getAllRunningOrders = async (req: any, res: Response) => {
   try {
+    // Already ownership-checked at the route level via requireOwnRestaurant().
     const restaurantId = Number(req.params.restaurantId);
     const branchId = Number(req.params.branchId);
     const response = await getAllRunningOrdersService(restaurantId, branchId);
     return res.status(200).json({ success: true, data: response });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res);
   }
 };
 
-export const updateRunningOrderStatus = async (req: Request, res: Response) => {
+export const updateRunningOrderStatus = async (req: any, res: Response) => {
   try {
     const orderId = Number(req.params.orderId);
     const { status } = req.body;
-    const response = await updateRunningOrderStatusService(orderId, status);
+    const response = await updateRunningOrderStatusService(Number(req.user.restaurantId), orderId, status);
     return res.status(200).json({ success: true, data: response });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res);
   }
 };
 
-export const requestItemCancel = async (req: Request, res: Response) => {
+export const requestItemCancel = async (req: any, res: Response) => {
   try {
-    await requestItemCancelService(Number(req.params.itemId));
+    await requestItemCancelService(Number(req.user.restaurantId), Number(req.params.itemId));
     return res.status(200).json({ success: true });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res);
   }
 };
 
-export const approveItemCancel = async (req: Request, res: Response) => {
+export const approveItemCancel = async (req: any, res: Response) => {
   try {
-    await approveItemCancelService(Number(req.params.itemId));
+    await approveItemCancelService(Number(req.user.restaurantId), Number(req.params.itemId));
     return res.status(200).json({ success: true });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res);
   }
 };
 
-export const rejectItemCancel = async (req: Request, res: Response) => {
+export const rejectItemCancel = async (req: any, res: Response) => {
   try {
-    await rejectItemCancelService(Number(req.params.itemId));
+    await rejectItemCancelService(Number(req.user.restaurantId), Number(req.params.itemId));
     return res.status(200).json({ success: true });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res);
   }
 };
 
-export const toggleItemDone = async (req: Request, res: Response) => {
+export const toggleItemDone = async (req: any, res: Response) => {
   try {
     const itemId = Number(req.params.itemId);
     const { done } = req.body;
-    const response = await toggleItemDoneService(itemId, !!done);
+    const response = await toggleItemDoneService(Number(req.user.restaurantId), itemId, !!done);
     return res.status(200).json({ success: true, data: response });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res);
   }
 };
 
-export const holdRunningOrder = async (req: Request, res: Response) => {
+export const holdRunningOrder = async (req: any, res: Response) => {
   try {
     const orderId = Number(req.params.orderId);
-    const response = await holdRunningOrderService(orderId);
+    const response = await holdRunningOrderService(Number(req.user.restaurantId), orderId);
     return res.status(200).json({ success: true, data: response });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res);
   }
 };
 
-export const resumeRunningOrder = async (req: Request, res: Response) => {
+export const resumeRunningOrder = async (req: any, res: Response) => {
   try {
     const orderId = Number(req.params.orderId);
-    const response = await resumeRunningOrderService(orderId);
+    const response = await resumeRunningOrderService(Number(req.user.restaurantId), orderId);
     return res.status(200).json({ success: true, data: response });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res);
   }
 };
 
@@ -151,16 +150,16 @@ export const transferTable = async (req: any, res: Response) => {
     );
     return res.status(200).json({ success: true, data: response });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res);
   }
 };
 
-export const discardRunningOrder = async (req: Request, res: Response) => {
+export const discardRunningOrder = async (req: any, res: Response) => {
   try {
     const orderId = Number(req.params.orderId);
-    const response = await discardRunningOrderService(orderId);
+    const response = await discardRunningOrderService(Number(req.user.restaurantId), orderId);
     return res.status(200).json({ success: true, data: response });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res);
   }
 };
