@@ -9,10 +9,13 @@ import {
   getBillRefundsService,
 } from "./bill.service";
 
-export const createBill = async (req: Request, res: Response) => {
+export const createBill = async (req: any, res: Response) => {
   try {
-    console.log("in bill controller");
-    const bill = await createBillService(req.body);
+    // Never trust a client-supplied restaurantId — force the caller's own,
+    // same pattern as every other create endpoint fixed in this hardening
+    // pass, or an authenticated user from any restaurant could plant bills
+    // (revenue/GST/discount data) attributed to a different tenant.
+    const bill = await createBillService({ ...req.body, restaurantId: req.user.restaurantId });
     return res.status(201).json({
       success: true,
       bill,
@@ -55,8 +58,9 @@ export const getBranchWiseBills = async (req: Request, res: Response) => {
   try {
     const restaurantId = Number(req.params.restaurantId);
     const branchId = Number(req.params.branchId);
-    console.log(restaurantId, branchId, "ids");
-    const bills = await getBranchWiseBillsService(restaurantId, branchId);
+    const from = req.query.from as string | undefined;
+    const to = req.query.to as string | undefined;
+    const bills = await getBranchWiseBillsService(restaurantId, branchId, from || to ? { from, to } : undefined);
     return res.status(200).json({
       success: true,
       bills,

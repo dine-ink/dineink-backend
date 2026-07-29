@@ -259,7 +259,6 @@ async function previewDemoDataCounts(db: Db, restaurantIds: number[]): Promise<R
   const ids = restaurantIds;
   const counts = await Promise.all([
     db.bill.count({ where: { restaurantId: { in: ids } } }),
-    db.order.count({ where: { restaurantId: { in: ids } } }),
     db.runningOrder.count({ where: { restaurantId: { in: ids } } }),
     db.menuItem.count({ where: { restaurantId: { in: ids } } }),
     db.ingredient.count({ where: { restaurantId: { in: ids } } }),
@@ -270,14 +269,13 @@ async function previewDemoDataCounts(db: Db, restaurantIds: number[]): Promise<R
   ]);
   return {
     Bill: counts[0],
-    Order: counts[1],
-    RunningOrder: counts[2],
-    MenuItem: counts[3],
-    Ingredient: counts[4],
-    Vendor: counts[5],
-    Customer: counts[6],
-    User: counts[7],
-    Branch: counts[8],
+    RunningOrder: counts[1],
+    MenuItem: counts[2],
+    Ingredient: counts[3],
+    Vendor: counts[4],
+    Customer: counts[5],
+    User: counts[6],
+    Branch: counts[7],
   };
 }
 
@@ -321,13 +319,11 @@ export async function resetDemoRestaurantData(db: Db, config: SeedConfig): Promi
       "RunningOrderBatchItem",
       () => db.runningOrderBatchItem.deleteMany({ where: { runningOrderBatch: { runningOrder: { restaurantId: r } } } }),
     ],
-    ["OrderItem", () => db.orderItem.deleteMany({ where: { order: { restaurantId: r } } })],
     ["BillItem", () => db.billItem.deleteMany({ where: { bill: { restaurantId: r } } })],
     ["BillRefund", () => db.billRefund.deleteMany({ where: { bill: { restaurantId: r } } })],
     ["AttendanceBreak", () => db.attendanceBreak.deleteMany({ where: { attendance: { restaurantId: r } } })],
     ["RunningOrderBatch", () => db.runningOrderBatch.deleteMany({ where: { runningOrder: { restaurantId: r } } })],
     ["RunningOrder", () => db.runningOrder.deleteMany({ where: { restaurantId: r } })],
-    ["Order", () => db.order.deleteMany({ where: { restaurantId: r } })],
     ["Bill", () => db.bill.deleteMany({ where: { restaurantId: r } })],
     ["MenuItemAddOnGroup", () => db.menuItemAddOnGroup.deleteMany({ where: { menuItem: { restaurantId: r } } })],
     ["MenuItemIngredient", () => db.menuItemIngredient.deleteMany({ where: { menuItem: { restaurantId: r } } })],

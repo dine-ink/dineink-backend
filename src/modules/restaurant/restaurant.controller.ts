@@ -21,6 +21,14 @@ import {
   updateMenuItemService,
   deleteMenuItemService,
 } from "./restaurant.service";
+import { ForbiddenError } from "./restaurant.validation";
+
+const handleError = (error: any, res: Response, fallbackStatus = 500) => {
+  if (error instanceof ForbiddenError) {
+    return res.status(403).json({ success: false, message: error.message });
+  }
+  return res.status(fallbackStatus).json({ success: false, message: error.message });
+};
 
 export const setupRestaurant = async (req: any, res: Response) => {
   try {
@@ -83,10 +91,8 @@ export const getMyRestaurant = async (req: any, res: Response) => {
   try {
     const userId = req.user.id;
     const data = await getMyRestaurantService(userId);
-    console.log(data, "data");
     return res.status(200).json({
       success: true,
-
       data,
     });
   } catch (error: any) {
@@ -168,9 +174,9 @@ export const getTablesController = async (req: Request, res: Response) => {
   }
 };
 
-export const createRestaurantTable = async (req: Request, res: Response) => {
+export const createRestaurantTable = async (req: any, res: Response) => {
   try {
-    const table = await createRestaurantTableService(req.body);
+    const table = await createRestaurantTableService(req.user.restaurantId, req.body);
 
     return res.status(201).json({
       success: true,
@@ -178,19 +184,15 @@ export const createRestaurantTable = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.log(error);
-
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
+    return handleError(error, res, 400);
   }
 };
 
-export const deleteRestaurantTable = async (req: Request, res: Response) => {
+export const deleteRestaurantTable = async (req: any, res: Response) => {
   try {
     const id = Number(req.params.id);
 
-    await deleteRestaurantTableService(id);
+    await deleteRestaurantTableService(req.user.restaurantId, id);
 
     return res.status(200).json({
       success: true,
@@ -198,20 +200,19 @@ export const deleteRestaurantTable = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.log(error);
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res, 400);
   }
 };
 
-// Update restaurant logo from the Shops page
+// Update restaurant logo from the Shops page — always the caller's OWN
+// restaurant, never a client-supplied restaurantId (previously this let any
+// authenticated user overwrite ANY restaurant's logo by passing a different id).
 export const updateRestaurantLogo = async (req: any, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: "No file uploaded" });
     }
-    const restaurantId = Number(req.body.restaurantId);
-    if (!restaurantId) {
-      return res.status(400).json({ success: false, message: "restaurantId is required" });
-    }
+    const restaurantId = Number(req.user.restaurantId);
     const logoPath = `/uploads/${req.file.filename}`;
     await prisma.restaurant.update({
       where: { id: restaurantId },
@@ -225,20 +226,20 @@ export const updateRestaurantLogo = async (req: any, res: Response) => {
 
 export const createStaff = async (req: any, res: Response) => {
   try {
-    const staff = await createStaffService(req.body);
+    const staff = await createStaffService(req.user.restaurantId, req.body);
     return res.status(201).json({ success: true, data: staff });
   } catch (error: any) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleError(error, res);
   }
 };
 
 export const updateStaff = async (req: any, res: Response) => {
   try {
     const userId = Number(req.params.id);
-    const staff = await updateStaffService(userId, req.body);
+    const staff = await updateStaffService(req.user.restaurantId, userId, req.body);
     return res.status(200).json({ success: true, data: staff });
   } catch (error: any) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleError(error, res);
   }
 };
 
@@ -254,62 +255,62 @@ export const getCategories = async (req: Request, res: Response) => {
   }
 };
 
-export const createCategory = async (req: Request, res: Response) => {
+export const createCategory = async (req: any, res: Response) => {
   try {
-    const data = await createCategoryService(req.body);
+    const data = await createCategoryService(req.user.restaurantId, req.body);
     return res.status(201).json({ success: true, data });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res, 400);
   }
 };
 
-export const updateCategory = async (req: Request, res: Response) => {
+export const updateCategory = async (req: any, res: Response) => {
   try {
     const id = Number(req.params.id);
-    const data = await updateCategoryService(id, req.body);
+    const data = await updateCategoryService(req.user.restaurantId, id, req.body);
     return res.status(200).json({ success: true, data });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res, 400);
   }
 };
 
-export const deleteCategory = async (req: Request, res: Response) => {
+export const deleteCategory = async (req: any, res: Response) => {
   try {
     const id = Number(req.params.id);
-    await deleteCategoryService(id);
+    await deleteCategoryService(req.user.restaurantId, id);
     return res.status(200).json({ success: true, message: "Category deleted" });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res, 400);
   }
 };
 
 // ── MenuItem controllers ─────────────────────────────────────────────────────
 
-export const createMenuItem = async (req: Request, res: Response) => {
+export const createMenuItem = async (req: any, res: Response) => {
   try {
-    const data = await createMenuItemService(req.body);
+    const data = await createMenuItemService(req.user.restaurantId, req.body);
     return res.status(201).json({ success: true, data });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res, 400);
   }
 };
 
-export const updateMenuItem = async (req: Request, res: Response) => {
+export const updateMenuItem = async (req: any, res: Response) => {
   try {
     const id = Number(req.params.id);
-    const data = await updateMenuItemService(id, req.body);
+    const data = await updateMenuItemService(req.user.restaurantId, id, req.body);
     return res.status(200).json({ success: true, data });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res, 400);
   }
 };
 
-export const deleteMenuItem = async (req: Request, res: Response) => {
+export const deleteMenuItem = async (req: any, res: Response) => {
   try {
     const id = Number(req.params.id);
-    await deleteMenuItemService(id);
+    await deleteMenuItemService(req.user.restaurantId, id);
     return res.status(200).json({ success: true, message: "Menu item deleted" });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res, 400);
   }
 };

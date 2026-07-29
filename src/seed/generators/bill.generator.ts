@@ -4,7 +4,6 @@ import type {
   DiscountCode,
   MenuItem,
   MenuItemIngredient,
-  Order,
   Prisma,
   RunningOrder,
   User,
@@ -27,8 +26,6 @@ import {
 } from "../utils";
 
 export interface BillingSeedResult {
-  /** Always empty — see the docstring on generateBillingHistory() for why. */
-  orders: Order[];
   runningOrders: RunningOrder[];
   billCount: number;
   /** branchId -> "yyyy-mm-dd" -> ingredientId -> qty consumed that day (recipe qty x billed qty). Feeds generateDailyStockAudits() so it doesn't have to re-join BillItem x MenuItemIngredient itself. */
@@ -272,13 +269,6 @@ function buildTransactionPlan(
  * service always uses the real current date and this needs 3 months of
  * correctly-dated invoice numbers instead).
  *
- * `orders`/OrderItem are deliberately NEVER created — grepping the codebase
- * turned up zero call sites that create an Order row anywhere (orders.
- * service.ts, despite its name, only ever reads RunningOrder); the schema
- * still has the model but nothing writes to it in this app anymore, so
- * seeding fake rows there would misrepresent what a real instance looks
- * like.
- *
  * Also deliberately does NOT create a "SALE_DEDUCTION" InventoryAdjustment
  * per ingredient per bill (what the real bill.service.ts/runningOrder.
  * service.ts do on every paid bill) or decrement live Ingredient.quantity —
@@ -300,7 +290,7 @@ function buildTransactionPlan(
 export async function generateBillingHistory(db: Db, config: SeedConfig, ctx: SeedContext): Promise<BillingSeedResult> {
   const existingCount = await db.bill.count({ where: { restaurantId: ctx.restaurant.id } });
   if (existingCount > 0) {
-    return { orders: [], runningOrders: [], billCount: existingCount, dailyIngredientConsumption: new Map() };
+    return { runningOrders: [], billCount: existingCount, dailyIngredientConsumption: new Map() };
   }
 
   const addOnsByMenuItem = buildAddOnsByMenuItem(ctx);
@@ -526,5 +516,5 @@ export async function generateBillingHistory(db: Db, config: SeedConfig, ctx: Se
     dailyIngredientConsumption.set(plan.branchId, branchMap);
   });
 
-  return { orders: [], runningOrders, billCount: bills.length, dailyIngredientConsumption };
+  return { runningOrders, billCount: bills.length, dailyIngredientConsumption };
 }

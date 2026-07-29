@@ -18,8 +18,13 @@ export const getCustomersByBranchService = async (
       email: true,
       address: true,
       createdAt: true,
+      // PAID-only — matches the "repeat customer" / "visits" definition used
+      // everywhere else (branchComparison.service.ts, Executive Dashboard);
+      // previously included PENDING/CANCELLED bills too, so this page's
+      // Repeat Customer Rate (and spend/lastVisit) disagreed with every
+      // other screen showing the same concept.
       bills: {
-        where: { ...(branchId && { branchId }) },
+        where: { status: "PAID", ...(branchId && { branchId }) },
         select: {
           id: true,
           total: true,

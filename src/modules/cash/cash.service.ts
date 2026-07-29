@@ -1,4 +1,5 @@
 import prisma from "../../config/prisma";
+import { ForbiddenError } from "./cash.validation";
 
 export const getCashSessionsService = async (
   branchId: number,
@@ -45,14 +46,16 @@ export const getCashSessionsService = async (
   }));
 };
 
-export const openCashSessionService = async (data: {
+export const openCashSessionService = async (callerRestaurantId: number, data: {
   branchId: number;
-  restaurantId: number;
   openedById: number;
   openingCash: number;
   businessDate?: string;
   notes?: string;
 }) => {
+  const branch = await prisma.branch.findUnique({ where: { id: Number(data.branchId) }, select: { restaurantId: true } });
+  if (!branch || branch.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this branch");
+
   // One open session per cashier at a time (not per branch — a branch can
   // have several cashiers/tills open concurrently, each with their own
   // drawer). This replaces the old DB-level "one session per branch per
@@ -66,7 +69,7 @@ export const openCashSessionService = async (data: {
 
   return prisma.dailyCashSession.create({
     data: {
-      restaurant: { connect: { id: data.restaurantId } },
+      restaurant: { connect: { id: callerRestaurantId } },
       branch:     { connect: { id: data.branchId     } },
       openedById: data.openedById,
       openingCash: data.openingCash,
@@ -124,6 +127,7 @@ export const getShiftSalesSummaryService = async (sessionId: number) => {
 };
 
 export const closeCashSessionService = async (
+  callerRestaurantId: number,
   sessionId: number,
   data: {
     closedById: number;
@@ -135,10 +139,11 @@ export const closeCashSessionService = async (
 ) => {
   const session = await prisma.dailyCashSession.findUnique({
     where: { id: sessionId },
-    select: { openingCash: true, openedAt: true, branchId: true },
+    select: { openingCash: true, openedAt: true, branchId: true, restaurantId: true },
   });
 
   if (!session) throw new Error("Session not found");
+  if (session.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this cash session");
 
   // Auto-calculate expected cash: opening + CASH bills during THIS session's
   // own open→now window — not the whole business day, which would count

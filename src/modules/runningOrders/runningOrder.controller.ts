@@ -15,9 +15,10 @@ import {
   transferTableService,
 } from "./runningOrder.service";
 
-export const saveRunningOrder = async (req: Request, res: Response) => {
+export const saveRunningOrder = async (req: any, res: Response) => {
   try {
-    const response = await saveRunningOrderService(req.body);
+    // Never trust a client-supplied restaurantId — force the caller's own.
+    const response = await saveRunningOrderService({ ...req.body, restaurantId: req.user.restaurantId });
     return res.status(201).json({ success: true, data: response });
   } catch (error: any) {
     return res.status(400).json({
@@ -138,13 +139,14 @@ export const resumeRunningOrder = async (req: Request, res: Response) => {
   }
 };
 
-export const transferTable = async (req: Request, res: Response) => {
+export const transferTable = async (req: any, res: Response) => {
   try {
-    const { fromTableId, toTableId, restaurantId, branchId } = req.body;
+    const { fromTableId, toTableId, branchId } = req.body;
+    // Never trust a client-supplied restaurantId — force the caller's own.
     const response = await transferTableService(
       Number(fromTableId),
       Number(toTableId),
-      Number(restaurantId),
+      Number(req.user.restaurantId),
       Number(branchId),
     );
     return res.status(200).json({ success: true, data: response });

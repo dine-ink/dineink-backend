@@ -1,4 +1,5 @@
 import prisma from "../../config/prisma";
+import { ForbiddenError } from "./analytics.validation";
 
 // ─── In-memory TTL cache for analytics ───────────────────────────────────────
 const cache = new Map<string, { data: any; expiresAt: number }>();
@@ -275,13 +276,16 @@ export const getDashboardOverviewService = async (
 };
 
 // ─── saveRestaurantInsightsData ───────────────────────────────────────────────
-export const saveRestaurantInsightsData = async (data: any) => {
-  const { restaurantId, branchId, revenue, ...rest } = data;
+export const saveRestaurantInsightsData = async (callerRestaurantId: number, data: any) => {
+  const { branchId, revenue, ...rest } = data;
+
+  const branch = await prisma.branch.findUnique({ where: { id: Number(branchId) }, select: { restaurantId: true } });
+  if (!branch || branch.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this branch");
 
   return prisma.restaurantInsights.upsert({
-    where: { restaurantId_branchId: { restaurantId, branchId } },
+    where: { restaurantId_branchId: { restaurantId: callerRestaurantId, branchId } },
     update: { ...rest },
-    create: { restaurantId, branchId, ...rest },
+    create: { restaurantId: callerRestaurantId, branchId, ...rest },
   });
 };
 
@@ -432,26 +436,3 @@ export const getTableOperationsService = async (
   };
 };
 
-// ─── getDashboardOverviewDataService (owner/admin view — no restaurant filter) ─
-export const getDashboardOverviewDataService = async (range = "today") => {
-  const { startDate, endDate } = getDateRange(range);
-
-  const [bills, occupiedTables, branches] = await Promise.all([
-    prisma.bill.findMany({
-      where: { status: "PAID", createdAt: { gte: startDate, lte: endDate } },
-      select: billSelect,
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.restaurantTable.count({ where: { status: "OCCUPIED" } }),
-    prisma.branch.count(),
-  ]);
-
-  const aggregated = aggregateBills(bills);
-
-  return {
-    ...aggregated,
-    occupiedTables,
-    branches,
-    recentOrders: bills.slice(0, 10),
-  };
-};

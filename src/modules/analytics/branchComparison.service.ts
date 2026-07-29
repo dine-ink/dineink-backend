@@ -1,4 +1,6 @@
 import prisma from "../../config/prisma";
+import { fetchInsightsForScope, getMenuItemCostMap, getPayrollPolicyMap, resolveScopedMetrics } from "../finance/finance.service";
+import { DateRange } from "../../utils/dateRange";
 
 const toNum = (v: any) => Number(v) || 0;
 
@@ -7,13 +9,16 @@ const buildDateFilter = (from?: string, to?: string) =>
     ? { createdAt: { gte: new Date(from), lte: new Date(to + "T23:59:59.999Z") } }
     : {};
 
-// Staff salaries are monthly figures — prorate to the comparison's date
-// range so a week-long comparison doesn't attribute a full month's labour
-// cost, matching the salary/30-per-day convention used on Attendance/Insights.
-const daysInRange = (from?: string, to?: string) => {
-  if (!from || !to) return 30;
-  const ms = new Date(to).getTime() - new Date(from).getTime();
-  return Math.max(1, Math.round(ms / 86_400_000) + 1);
+// Same fallback window (30 days) the old local daysInRange used — kept only
+// for the from/to-missing edge case; resolveScopedMetrics always needs a
+// concrete DateRange (unlike this file's own operational queries below,
+// which can run with an empty/all-time filter).
+const toDateRange = (from?: string, to?: string): DateRange => {
+  if (from && to) return { startDate: new Date(from), endDate: new Date(to + "T23:59:59.999Z") };
+  const endDate = new Date();
+  const startDate = new Date(endDate);
+  startDate.setDate(startDate.getDate() - 30);
+  return { startDate, endDate };
 };
 
 // ─── Per-branch data aggregation ─────────────────────────────────────────────
@@ -25,14 +30,13 @@ export const getBranchComparisonService = async (
 ) => {
   const dateFilter = buildDateFilter(from, to);
   const paidFilter = { status: "PAID" as const };
-  const rangeDays = daysInRange(from, to);
+  const range = toDateRange(from, to);
 
   const [
     branches,
     billStats,
     orderTypeBreakdown,
     paymentBreakdown,
-    expenseStats,
     staffStats,
     customerBreakdown,
   ] = await Promise.all([
@@ -60,16 +64,10 @@ export const getBranchComparisonService = async (
       _count: { id: true },
       _sum: { total: true },
     }),
-    prisma.shopExpense.groupBy({
-      by: ["branchId"],
-      where: { restaurantId, ...dateFilter },
-      _sum: { amount: true },
-    }),
     prisma.user.groupBy({
       by: ["branchId"],
       where: { restaurantId, branchId: { not: null }, isDeleted: false },
       _count: { id: true },
-      _sum: { salary: true },
     }),
     prisma.bill.groupBy({
       by: ["branchId", "customerId"],
@@ -83,59 +81,80 @@ export const getBranchComparisonService = async (
     }),
   ]);
 
-  // Top 5 items per branch — one query per branch (bounded by branch count)
-  const topItemsByBranch = await Promise.all(
-    branches.map(async (branch) => {
-      const items = await prisma.billItem.groupBy({
-        by: ["itemName"],
-        where: {
-          bill: { branchId: branch.id, restaurantId, ...dateFilter, ...paidFilter },
-        },
-        _sum: { quantity: true, total: true },
-        orderBy: { _sum: { quantity: "desc" } },
-        take: 5,
-      });
-      return { branchId: branch.id, items };
-    }),
+  // Top 5 items per branch — one query per branch, bounded by branch count.
+  const [topItemsByBranch, menuItemCostMap, payrollPolicyMap] = await Promise.all([
+    Promise.all(
+      branches.map(async (branch) => {
+        const items = await prisma.billItem.groupBy({
+          by: ["itemName"],
+          where: {
+            bill: { branchId: branch.id, restaurantId, ...dateFilter, ...paidFilter },
+          },
+          _sum: { quantity: true, total: true },
+          orderBy: { _sum: { quantity: "desc" } },
+          take: 5,
+        });
+        return { branchId: branch.id, items };
+      }),
+    ),
+    getMenuItemCostMap(restaurantId),
+    getPayrollPolicyMap(restaurantId),
+  ]);
+
+  // Revenue, Food Cost, Labour Cost, Prime Cost, EBITDA, and Net Profit are
+  // now sourced from the same Finance Engine (resolveScopedMetrics) every
+  // other financial screen uses — previously this file summed real
+  // ShopExpense transactions for opex (a different data source than the
+  // RestaurantInsights-prorated assumptions the Finance Engine uses
+  // everywhere else) and labeled the resulting EBITDA-equivalent figure
+  // "Net Profit" with no finance cost subtracted. Both bugs are fixed by
+  // routing through resolveScopedMetrics per branch, exactly as Executive
+  // Dashboard's Multi-Branch view already does.
+  const financialsByBranch = new Map(
+    await Promise.all(
+      branches.map(async (branch) => {
+        const insights = await fetchInsightsForScope(restaurantId, branch.id);
+        const bundle = await resolveScopedMetrics(restaurantId, branch.id, range, menuItemCostMap, insights, payrollPolicyMap);
+        return [branch.id, bundle] as const;
+      }),
+    ),
   );
 
   return branches.map((branch) => {
     const bills = billStats.find((b) => b.branchId === branch.id);
-    const expenses = expenseStats.find((e) => e.branchId === branch.id);
     const staff = staffStats.find((s) => s.branchId === branch.id);
     const orderTypes = orderTypeBreakdown.filter((o) => o.branchId === branch.id);
     const payments = paymentBreakdown.filter((p) => p.branchId === branch.id);
     const topItems =
       topItemsByBranch.find((t) => t.branchId === branch.id)?.items || [];
     const customerRows = customerBreakdown.filter((c) => c.branchId === branch.id);
+    const { metrics } = financialsByBranch.get(branch.id)!;
 
-    const revenue = toNum(bills?._sum.total);
     const discount = toNum(bills?._sum.discount);
     const gst = toNum(bills?._sum.cgst) + toNum(bills?._sum.sgst);
-    const expenseTotal = toNum(expenses?._sum.amount);
-    const monthlySalaryTotal = toNum(staff?._sum.salary);
-    const labourCost = Math.round(monthlySalaryTotal * (rangeDays / 30));
-    const netProfit = revenue - gst - expenseTotal - labourCost;
-    const orders = bills?._count.id || 0;
     const totalCustomers = customerRows.length;
     const repeatCustomers = customerRows.filter((c) => c._count.id > 1).length;
 
     return {
       branch,
-      revenue,
-      orders,
-      avgBill: orders > 0 ? Math.round(toNum(bills?._avg.total)) : 0,
+      revenue: metrics.revenue,
+      orders: metrics.orders,
+      avgBill: Math.round(metrics.avgOrderValue),
       discount,
       gst,
-      expenses: expenseTotal,
-      labourCost,
-      labourCostPercentage:
-        revenue > 0 ? Math.round((labourCost / revenue) * 1000) / 10 : 0,
-      netProfit,
+      expenses: metrics.fixedExpenses + metrics.variableExpenses,
+      foodCost: metrics.foodCost,
+      foodCostPercentage: metrics.foodCostPercentage,
+      labourCost: metrics.labourCost,
+      labourCostPercentage: metrics.labourCostPercentage,
+      primeCost: metrics.primeCost,
+      primeCostPercentage: metrics.primeCostPercentage,
+      ebitda: metrics.ebitda,
+      netProfit: metrics.netProfit,
       staffCount: staff?._count.id || 0,
       revenuePerEmployee:
         (staff?._count.id || 0) > 0
-          ? Math.round(revenue / (staff?._count.id || 1))
+          ? Math.round(metrics.revenue / (staff?._count.id || 1))
           : 0,
       totalCustomers,
       repeatCustomers,
@@ -214,6 +233,7 @@ export const getCityComparisonService = async (
     gst: number;
     expenses: number;
     labourCost: number;
+    ebitda: number;
     netProfit: number;
     staffCount: number;
     orderTypes: Record<string, { count: number; revenue: number }>;
@@ -235,6 +255,7 @@ export const getCityComparisonService = async (
         gst: 0,
         expenses: 0,
         labourCost: 0,
+        ebitda: 0,
         netProfit: 0,
         staffCount: 0,
         orderTypes: {},
@@ -250,6 +271,7 @@ export const getCityComparisonService = async (
     c.gst += bd.gst;
     c.expenses += bd.expenses;
     c.labourCost += bd.labourCost;
+    c.ebitda += bd.ebitda;
     c.netProfit += bd.netProfit;
     c.staffCount += bd.staffCount;
 
@@ -287,6 +309,7 @@ export const getCityComparisonService = async (
       labourCost: c.labourCost,
       labourCostPercentage:
         c.revenue > 0 ? Math.round((c.labourCost / c.revenue) * 1000) / 10 : 0,
+      ebitda: c.ebitda,
       netProfit: c.netProfit,
       staffCount: c.staffCount,
       revenuePerEmployee:

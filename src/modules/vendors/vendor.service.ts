@@ -1,4 +1,5 @@
 import prisma from "../../config/prisma";
+import { ForbiddenError } from "./vendor.validation";
 
 // Whether this branch has ever logged a vendor invoice at all, regardless of
 // payment status — distinguishes "no purchasing data entered" from "invoices
@@ -15,16 +16,21 @@ export const getVendorInvoiceActivityService = async (
 
 // ── Vendor Payments ───────────────────────────────────────────────────────────
 
+// Capped rather than paginated — the UI shows a vendor's full history in one
+// scrollable modal, not a paged grid, so a hard cap on the most recent rows
+// protects against unbounded growth without needing frontend pagination.
+const VENDOR_HISTORY_LIMIT = 500;
+
 export const getVendorPaymentsService = async (vendorId: number) => {
   return prisma.vendorPayment.findMany({
     where: { vendorId },
     orderBy: { paymentDate: "desc" },
+    take: VENDOR_HISTORY_LIMIT,
   });
 };
 
-export const createVendorPaymentService = async (data: {
+export const createVendorPaymentService = async (callerRestaurantId: number, data: {
   vendorId: number;
-  restaurantId: number;
   branchId: number;
   amount: number;
   paymentMethod?: string;
@@ -32,10 +38,12 @@ export const createVendorPaymentService = async (data: {
   paymentDate: string;
   createdById?: number;
 }) => {
+  const vendor = await prisma.vendor.findUnique({ where: { id: data.vendorId }, select: { restaurantId: true } });
+  if (!vendor || vendor.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this vendor");
   return prisma.vendorPayment.create({
     data: {
       vendorId:      data.vendorId,
-      restaurantId:  data.restaurantId,
+      restaurantId:  callerRestaurantId,
       branchId:      data.branchId,
       amount:        data.amount,
       paymentMethod: data.paymentMethod,
@@ -46,7 +54,10 @@ export const createVendorPaymentService = async (data: {
   });
 };
 
-export const deleteVendorPaymentService = async (id: number) => {
+export const deleteVendorPaymentService = async (callerRestaurantId: number, id: number) => {
+  const existing = await prisma.vendorPayment.findUnique({ where: { id }, select: { restaurantId: true } });
+  if (!existing) throw new Error("Payment not found");
+  if (existing.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this payment");
   return prisma.vendorPayment.delete({ where: { id } });
 };
 
@@ -56,12 +67,12 @@ export const getVendorInvoicesService = async (vendorId: number) => {
   return prisma.vendorInvoice.findMany({
     where: { vendorId },
     orderBy: { invoiceDate: "desc" },
+    take: VENDOR_HISTORY_LIMIT,
   });
 };
 
-export const createVendorInvoiceService = async (data: {
+export const createVendorInvoiceService = async (callerRestaurantId: number, data: {
   vendorId: number;
-  restaurantId: number;
   branchId: number;
   invoiceNumber?: string;
   invoiceDate: string;
@@ -71,10 +82,12 @@ export const createVendorInvoiceService = async (data: {
   notes?: string;
   createdById?: number;
 }) => {
+  const vendor = await prisma.vendor.findUnique({ where: { id: data.vendorId }, select: { restaurantId: true } });
+  if (!vendor || vendor.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this vendor");
   return prisma.vendorInvoice.create({
     data: {
       vendorId:      data.vendorId,
-      restaurantId:  data.restaurantId,
+      restaurantId:  callerRestaurantId,
       branchId:      data.branchId,
       invoiceNumber: data.invoiceNumber,
       invoiceDate:   new Date(data.invoiceDate),
@@ -90,11 +103,13 @@ export const createVendorInvoiceService = async (data: {
 };
 
 export const payVendorInvoiceService = async (
+  callerRestaurantId: number,
   invoiceId: number,
   payAmount: number,
 ) => {
   const invoice = await prisma.vendorInvoice.findUnique({ where: { id: invoiceId } });
   if (!invoice) throw new Error("Invoice not found");
+  if (invoice.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this invoice");
 
   const newPaid = invoice.paidAmount + payAmount;
   const status  = newPaid >= invoice.totalAmount ? "PAID" : "PARTIAL";
@@ -105,7 +120,10 @@ export const payVendorInvoiceService = async (
   });
 };
 
-export const deleteVendorInvoiceService = async (id: number) => {
+export const deleteVendorInvoiceService = async (callerRestaurantId: number, id: number) => {
+  const existing = await prisma.vendorInvoice.findUnique({ where: { id }, select: { restaurantId: true } });
+  if (!existing) throw new Error("Invoice not found");
+  if (existing.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this invoice");
   return prisma.vendorInvoice.delete({ where: { id } });
 };
 
@@ -117,10 +135,18 @@ export const getVendorOutstandingService = async (
 ) => {
   const [vendors, invoices, payments] = await Promise.all([
     prisma.vendor.findMany({ where: { restaurantId, branchId } }),
+    // Naturally self-limiting — only currently-unpaid invoices, not full history.
     prisma.vendorInvoice.findMany({
       where: { restaurantId, branchId, status: { not: "PAID" } },
     }),
-    prisma.vendorPayment.findMany({ where: { restaurantId, branchId } }),
+    // Unlike the invoice fetch above, this has no natural bound (every
+    // payment ever recorded stays PAID forever) — capped for the same reason
+    // as getVendorPaymentsService.
+    prisma.vendorPayment.findMany({
+      where: { restaurantId, branchId },
+      orderBy: { paymentDate: "desc" },
+      take: VENDOR_HISTORY_LIMIT,
+    }),
   ]);
 
   return vendors.map((v) => {
@@ -170,6 +196,13 @@ export const getVendorPerformanceService = async (
     prisma.vendor.findMany({ where: { restaurantId, branchId } }),
     prisma.vendorInvoice.findMany({
       where: { restaurantId, branchId, ...dateFilter },
+      // Matches the same VENDOR_HISTORY_LIMIT bound already applied to this
+      // file's other three vendor-history queries — this one was added later
+      // for the Vendor Performance feature and had no cap, so a branch with
+      // no from/to filter (the frontend never supplies one) could pull its
+      // entire invoice history with no bound.
+      orderBy: { invoiceDate: "desc" },
+      take: VENDOR_HISTORY_LIMIT,
     }),
     prisma.ingredientVendor.findMany({
       where: { branchId },

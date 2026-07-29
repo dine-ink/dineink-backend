@@ -12,6 +12,14 @@ import {
   getMenuItemAddOnGroupsService,
   getRestaurantAddOnAttachmentsService,
 } from "./addon.service";
+import { ForbiddenError } from "./addon.validation";
+
+const handleError = (error: any, res: Response) => {
+  if (error instanceof ForbiddenError) {
+    return res.status(403).json({ success: false, message: error.message });
+  }
+  return res.status(400).json({ success: false, message: error.message });
+};
 
 export const getAddOnGroups = async (req: Request, res: Response) => {
   try {
@@ -23,83 +31,83 @@ export const getAddOnGroups = async (req: Request, res: Response) => {
   }
 };
 
-export const createAddOnGroup = async (req: Request, res: Response) => {
+export const createAddOnGroup = async (req: any, res: Response) => {
   try {
-    const data = await createAddOnGroupService(req.body);
+    const data = await createAddOnGroupService(Number(req.user.restaurantId), req.body);
     return res.status(201).json({ success: true, data });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res);
   }
 };
 
-export const updateAddOnGroup = async (req: Request, res: Response) => {
+export const updateAddOnGroup = async (req: any, res: Response) => {
   try {
     const id = Number(req.params.id);
-    const data = await updateAddOnGroupService(id, req.body.name);
+    const data = await updateAddOnGroupService(Number(req.user.restaurantId), id, req.body.name);
     return res.status(200).json({ success: true, data });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res);
   }
 };
 
-export const deleteAddOnGroup = async (req: Request, res: Response) => {
+export const deleteAddOnGroup = async (req: any, res: Response) => {
   try {
     const id = Number(req.params.id);
-    await deleteAddOnGroupService(id);
+    await deleteAddOnGroupService(Number(req.user.restaurantId), id);
     return res.status(200).json({ success: true });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res);
   }
 };
 
-export const createAddOn = async (req: Request, res: Response) => {
+export const createAddOn = async (req: any, res: Response) => {
   try {
-    const data = await createAddOnService(req.body);
+    const data = await createAddOnService(Number(req.user.restaurantId), req.body);
     return res.status(201).json({ success: true, data });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res);
   }
 };
 
-export const updateAddOn = async (req: Request, res: Response) => {
+export const updateAddOn = async (req: any, res: Response) => {
   try {
     const id = Number(req.params.id);
-    const data = await updateAddOnService(id, req.body);
+    const data = await updateAddOnService(Number(req.user.restaurantId), id, req.body);
     return res.status(200).json({ success: true, data });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res);
   }
 };
 
-export const deleteAddOn = async (req: Request, res: Response) => {
+export const deleteAddOn = async (req: any, res: Response) => {
   try {
     const id = Number(req.params.id);
-    await deleteAddOnService(id);
+    await deleteAddOnService(Number(req.user.restaurantId), id);
     return res.status(200).json({ success: true });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res);
   }
 };
 
-export const attachAddOnGroup = async (req: Request, res: Response) => {
+export const attachAddOnGroup = async (req: any, res: Response) => {
   try {
     const menuItemId = Number(req.params.menuItemId);
     const { addOnGroupId } = req.body;
-    const data = await attachAddOnGroupService(menuItemId, Number(addOnGroupId));
+    const data = await attachAddOnGroupService(Number(req.user.restaurantId), menuItemId, Number(addOnGroupId));
     return res.status(200).json({ success: true, data });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res);
   }
 };
 
-export const detachAddOnGroup = async (req: Request, res: Response) => {
+export const detachAddOnGroup = async (req: any, res: Response) => {
   try {
     const menuItemId = Number(req.params.menuItemId);
     const addOnGroupId = Number(req.params.addOnGroupId);
-    await detachAddOnGroupService(menuItemId, addOnGroupId);
+    await detachAddOnGroupService(Number(req.user.restaurantId), menuItemId, addOnGroupId);
     return res.status(200).json({ success: true });
   } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
+    return handleError(error, res);
   }
 };
 

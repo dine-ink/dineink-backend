@@ -4,6 +4,7 @@ import {
   getMonthlyAttendanceService,
   upsertManualAttendanceService,
 } from "./attendance.service";
+import { ForbiddenError } from "./attendance.validation";
 
 export const getAttendanceByBranch = async (req: Request, res: Response) => {
   try {
@@ -36,12 +37,11 @@ export const getMonthlyAttendance = async (req: Request, res: Response) => {
   }
 };
 
-export const upsertManualAttendance = async (req: Request, res: Response) => {
+export const upsertManualAttendance = async (req: any, res: Response) => {
   try {
-    const { userId, restaurantId, branchId, date, manualTotalHours, overtimeHours, status } = req.body;
-    const data = await upsertManualAttendanceService({
+    const { userId, branchId, date, manualTotalHours, overtimeHours, status } = req.body;
+    const data = await upsertManualAttendanceService(Number(req.user.restaurantId), {
       userId: Number(userId),
-      restaurantId: Number(restaurantId),
       branchId: Number(branchId),
       date,
       manualTotalHours,
@@ -50,6 +50,9 @@ export const upsertManualAttendance = async (req: Request, res: Response) => {
     });
     return res.status(200).json({ success: true, data });
   } catch (error: any) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ success: false, message: error.message });
+    }
     return res.status(400).json({ success: false, message: error.message });
   }
 };

@@ -1,4 +1,5 @@
 import prisma from "../../config/prisma";
+import { ForbiddenError } from "./admin.validation";
 
 export const getTodayAttendanceService = async (branchId: number) => {
   const startOfDay = new Date();
@@ -48,11 +49,20 @@ export const getTodayAttendanceService = async (branchId: number) => {
   });
 };
 
-export const loginAttendanceService = async (data: {
-  userId: number;
-  restaurantId: number;
-  branchId: number;
-}) => {
+export const loginAttendanceService = async (
+  callerRestaurantId: number,
+  data: {
+    userId: number;
+    branchId: number;
+  },
+) => {
+  const user = await prisma.user.findUnique({ where: { id: data.userId }, select: { restaurantId: true } });
+  if (!user || user.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this employee");
+  if (data.branchId) {
+    const branch = await prisma.branch.findUnique({ where: { id: Number(data.branchId) }, select: { restaurantId: true } });
+    if (!branch || branch.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this branch");
+  }
+
   const today = new Date();
 
   const startOfDay = new Date(today);
@@ -79,7 +89,7 @@ export const loginAttendanceService = async (data: {
   return prisma.attendance.create({
     data: {
       userId: data.userId,
-      restaurantId: data.restaurantId,
+      restaurantId: callerRestaurantId,
       branchId: data.branchId,
 
       date: startOfDay,
@@ -91,7 +101,7 @@ export const loginAttendanceService = async (data: {
   });
 };
 
-export const logoutAttendanceService = async (attendanceId: number) => {
+export const logoutAttendanceService = async (callerRestaurantId: number, attendanceId: number) => {
   const attendance = await prisma.attendance.findUnique({
     where: {
       id: attendanceId,
@@ -100,6 +110,9 @@ export const logoutAttendanceService = async (attendanceId: number) => {
 
   if (!attendance) {
     throw new Error("Attendance not found");
+  }
+  if (attendance.restaurantId !== callerRestaurantId) {
+    throw new ForbiddenError("You do not have access to this attendance record");
   }
 
   if (!attendance.loginTime) {
@@ -162,10 +175,14 @@ export const getExpenseUsersService = async (branchId: number) => {
   });
 };
 
-export const createExpenseService = async (data: any) => {
+export const createExpenseService = async (callerRestaurantId: number, data: any) => {
+  if (data.branchId) {
+    const branch = await prisma.branch.findUnique({ where: { id: Number(data.branchId) }, select: { restaurantId: true } });
+    if (!branch || branch.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this branch");
+  }
   return prisma.shopExpense.create({
     data: {
-      restaurantId: data.restaurantId,
+      restaurantId: callerRestaurantId,
 
       branchId: data.branchId,
 
@@ -191,7 +208,10 @@ export const createExpenseService = async (data: any) => {
   });
 };
 
-export const updateExpenseService = async (id: number, data: any) => {
+export const updateExpenseService = async (callerRestaurantId: number, id: number, data: any) => {
+  const existing = await prisma.shopExpense.findUnique({ where: { id }, select: { restaurantId: true } });
+  if (!existing) throw new Error("Expense not found");
+  if (existing.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this expense");
   return prisma.shopExpense.update({
     where: {
       id,
@@ -218,7 +238,10 @@ export const updateExpenseService = async (id: number, data: any) => {
   });
 };
 
-export const deleteExpenseService = async (id: number) => {
+export const deleteExpenseService = async (callerRestaurantId: number, id: number) => {
+  const existing = await prisma.shopExpense.findUnique({ where: { id }, select: { restaurantId: true } });
+  if (!existing) throw new Error("Expense not found");
+  if (existing.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this expense");
   return prisma.shopExpense.delete({
     where: {
       id,
@@ -289,10 +312,14 @@ export const getInventoryUsersService = async (branchId: number) => {
     },
   });
 };
-export const createInventoryAdjustmentService = async (data: any) => {
+export const createInventoryAdjustmentService = async (callerRestaurantId: number, data: any) => {
+  if (data.branchId) {
+    const branch = await prisma.branch.findUnique({ where: { id: Number(data.branchId) }, select: { restaurantId: true } });
+    if (!branch || branch.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this branch");
+  }
   return prisma.inventoryAdjustment.create({
     data: {
-      restaurantId: data.restaurantId,
+      restaurantId: callerRestaurantId,
 
       branchId: data.branchId,
 
@@ -309,9 +336,13 @@ export const createInventoryAdjustmentService = async (data: any) => {
   });
 };
 export const updateInventoryAdjustmentService = async (
+  callerRestaurantId: number,
   id: number,
   data: any,
 ) => {
+  const existing = await prisma.inventoryAdjustment.findUnique({ where: { id }, select: { restaurantId: true } });
+  if (!existing) throw new Error("Inventory adjustment not found");
+  if (existing.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this inventory adjustment");
   return prisma.inventoryAdjustment.update({
     where: {
       id,
@@ -330,7 +361,10 @@ export const updateInventoryAdjustmentService = async (
     },
   });
 };
-export const deleteInventoryAdjustmentService = async (id: number) => {
+export const deleteInventoryAdjustmentService = async (callerRestaurantId: number, id: number) => {
+  const existing = await prisma.inventoryAdjustment.findUnique({ where: { id }, select: { restaurantId: true } });
+  if (!existing) throw new Error("Inventory adjustment not found");
+  if (existing.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this inventory adjustment");
   return prisma.inventoryAdjustment.delete({
     where: {
       id,

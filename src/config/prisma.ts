@@ -13,9 +13,9 @@ const connectionString = rawUrl.replace(/([?&])sslmode=[^&]+(&|$)/, (_m, pre, po
 );
 const pool = new Pool({
   connectionString,
-  max: 10,
+  max: 40,
   idleTimeoutMillis: 30_000,
-  connectionTimeoutMillis: 3_000,
+  connectionTimeoutMillis: 10_000,
   ssl: { rejectUnauthorized: false },
 });
 const adapter = new PrismaPg(pool);

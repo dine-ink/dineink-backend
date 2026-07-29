@@ -17,5 +17,5 @@
     "forceConsistentCasingInFileNames": true
   },
 
-  "exclude": ["prisma.config.ts", "scripts", "prisma/seed.ts", "src/seed"]
+  "exclude": ["prisma.config.ts", "vitest.config.ts", "vitest.integration.config.ts", "scripts", "prisma/seed.ts", "src/seed", "src/**/*.test.ts"]
 }

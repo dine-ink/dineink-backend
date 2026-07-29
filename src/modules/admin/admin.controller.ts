@@ -16,6 +16,15 @@ import {
   updateInventoryAdjustmentService,
   deleteInventoryAdjustmentService,
 } from "./admin.service";
+import { ForbiddenError } from "./admin.validation";
+
+const handleError = (error: any, res: Response, fallbackStatus = 400) => {
+  console.log(error);
+  if (error instanceof ForbiddenError) {
+    return res.status(403).json({ success: false, message: error.message });
+  }
+  return res.status(fallbackStatus).json({ success: false, message: error.message });
+};
 
 export const getTodayAttendance = async (req: Request, res: Response) => {
   try {
@@ -37,41 +46,31 @@ export const getTodayAttendance = async (req: Request, res: Response) => {
   }
 };
 
-export const loginAttendance = async (req: Request, res: Response) => {
+export const loginAttendance = async (req: any, res: Response) => {
   try {
-    const data = await loginAttendanceService(req.body);
+    const data = await loginAttendanceService(Number(req.user.restaurantId), req.body);
 
     return res.status(200).json({
       success: true,
       data,
     });
   } catch (error: any) {
-    console.log(error);
-
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
+    return handleError(error, res);
   }
 };
 
-export const logoutAttendance = async (req: Request, res: Response) => {
+export const logoutAttendance = async (req: any, res: Response) => {
   try {
     const attendanceId = Number(req.body.attendanceId);
 
-    const data = await logoutAttendanceService(attendanceId);
+    const data = await logoutAttendanceService(Number(req.user.restaurantId), attendanceId);
 
     return res.status(200).json({
       success: true,
       data,
     });
   } catch (error: any) {
-    console.log(error);
-
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
+    return handleError(error, res);
   }
 };
 
@@ -115,61 +114,46 @@ export const getExpenseUsers = async (req: Request, res: Response) => {
   }
 };
 
-export const createExpense = async (req: Request, res: Response) => {
+export const createExpense = async (req: any, res: Response) => {
   try {
-    const data = await createExpenseService(req.body);
+    const data = await createExpenseService(Number(req.user.restaurantId), req.body);
 
     return res.status(201).json({
       success: true,
       data,
     });
   } catch (error: any) {
-    console.log(error);
-
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
+    return handleError(error, res);
   }
 };
 
-export const updateExpense = async (req: Request, res: Response) => {
+export const updateExpense = async (req: any, res: Response) => {
   try {
     const id = Number(req.params.id);
 
-    const data = await updateExpenseService(id, req.body);
+    const data = await updateExpenseService(Number(req.user.restaurantId), id, req.body);
 
     return res.status(200).json({
       success: true,
       data,
     });
   } catch (error: any) {
-    console.log(error);
-
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
+    return handleError(error, res);
   }
 };
 
-export const deleteExpense = async (req: Request, res: Response) => {
+export const deleteExpense = async (req: any, res: Response) => {
   try {
     const id = Number(req.params.id);
 
-    await deleteExpenseService(id);
+    await deleteExpenseService(Number(req.user.restaurantId), id);
 
     return res.status(200).json({
       success: true,
       message: "Expense deleted successfully",
     });
   } catch (error: any) {
-    console.log(error);
-
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
+    return handleError(error, res);
   }
 };
 export const getInventoryAdjustments = async (req: Request, res: Response) => {
@@ -224,60 +208,51 @@ export const getInventoryUsers = async (req: Request, res: Response) => {
   }
 };
 export const createInventoryAdjustment = async (
-  req: Request,
+  req: any,
   res: Response,
 ) => {
   try {
-    const data = await createInventoryAdjustmentService(req.body);
+    const data = await createInventoryAdjustmentService(Number(req.user.restaurantId), req.body);
 
     return res.status(201).json({
       success: true,
       data,
     });
   } catch (error: any) {
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
+    return handleError(error, res);
   }
 };
 export const updateInventoryAdjustment = async (
-  req: Request,
+  req: any,
   res: Response,
 ) => {
   try {
     const id = Number(req.params.id);
 
-    const data = await updateInventoryAdjustmentService(id, req.body);
+    const data = await updateInventoryAdjustmentService(Number(req.user.restaurantId), id, req.body);
 
     return res.status(200).json({
       success: true,
       data,
     });
   } catch (error: any) {
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
+    return handleError(error, res);
   }
 };
 export const deleteInventoryAdjustment = async (
-  req: Request,
+  req: any,
   res: Response,
 ) => {
   try {
     const id = Number(req.params.id);
 
-    await deleteInventoryAdjustmentService(id);
+    await deleteInventoryAdjustmentService(Number(req.user.restaurantId), id);
 
     return res.status(200).json({
       success: true,
       message: "Inventory adjustment deleted",
     });
   } catch (error: any) {
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
+    return handleError(error, res);
   }
 };

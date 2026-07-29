@@ -1,4 +1,5 @@
 import prisma from "../../config/prisma";
+import { computeOvertimeCost, computeStandardShiftHours } from "../finance/finance.formulas";
 
 const toNum = (v: any) => Number(v) || 0;
 
@@ -278,31 +279,38 @@ export const getCustomerRFMService = async (
 ) => {
   const branchFilter = branchId ? { branchId } : {};
 
-  const customers = await prisma.customer.findMany({
-    where: { restaurantId },
-    select: {
-      id: true,
-      name: true,
-      phone: true,
-      createdAt: true,
-      bills: {
-        where: { ...branchFilter, status: "PAID" },
-        select: { total: true, createdAt: true },
-        orderBy: { createdAt: "desc" },
-      },
-    },
-  });
+  // RFM is inherently an all-time-per-customer computation (truncating a
+  // customer's history to a date window would corrupt the frequency/
+  // monetary/recency scoring itself) — so the fix here isn't a date filter,
+  // it's doing the per-customer rollup in Postgres via groupBy instead of
+  // pulling every bill row for every customer into Node to reduce in JS.
+  const [customers, billAgg] = await Promise.all([
+    prisma.customer.findMany({
+      where: { restaurantId },
+      select: { id: true, name: true, phone: true },
+    }),
+    prisma.bill.groupBy({
+      by: ["customerId"],
+      where: { restaurantId, ...branchFilter, status: "PAID", customerId: { not: null } },
+      _count: { id: true },
+      _sum: { total: true },
+      _max: { createdAt: true },
+    }),
+  ]);
 
+  const aggByCustomer = new Map(billAgg.map((b) => [b.customerId as number, b]));
   const now = new Date();
 
   const scored = customers
-    .filter((c) => c.bills.length > 0)
     .map((c) => {
+      const agg = aggByCustomer.get(c.id);
+      if (!agg || !agg._max.createdAt) return null;
+
       const recencyDays = Math.floor(
-        (now.getTime() - new Date(c.bills[0].createdAt).getTime()) / 86400000,
+        (now.getTime() - new Date(agg._max.createdAt).getTime()) / 86400000,
       );
-      const frequency = c.bills.length;
-      const monetary = Math.round(c.bills.reduce((s, b) => s + b.total, 0));
+      const frequency = agg._count.id;
+      const monetary = Math.round(agg._sum.total || 0);
 
       const R = recencyDays <= 7 ? 5 : recencyDays <= 30 ? 4 : recencyDays <= 60 ? 3 : recencyDays <= 90 ? 2 : 1;
       const F = frequency >= 10 ? 5 : frequency >= 5 ? 4 : frequency >= 3 ? 3 : frequency >= 2 ? 2 : 1;
@@ -315,8 +323,9 @@ export const getCustomerRFMService = async (
         rfm >= 7 ? "Potential" :
         rfm >= 5 ? "At Risk" : "Lost";
 
-      return { id: c.id, name: c.name, phone: c.phone, R, F, M, rfm, segment, recencyDays, frequency, monetary, lastVisit: c.bills[0].createdAt };
+      return { id: c.id, name: c.name, phone: c.phone, R, F, M, rfm, segment, recencyDays, frequency, monetary, lastVisit: agg._max.createdAt };
     })
+    .filter((c): c is NonNullable<typeof c> => c !== null)
     .sort((a, b) => b.rfm - a.rfm);
 
   const segmentCounts = scored.reduce((acc: Record<string, number>, c) => {
@@ -398,13 +407,6 @@ export const getStaffProductivityService = async (
     fullDayShiftHours: branch?.fullDayShiftHours ?? 10,
     overtimeRateMultiplier: branch?.overtimeRateMultiplier ?? 1.5,
   };
-  const getStandardShiftHours = (shift?: string | null) => {
-    const s = (shift || "").toUpperCase();
-    if (s === "MORNING") return payrollPolicy.morningShiftHours || 6;
-    if (s === "EVENING") return payrollPolicy.eveningShiftHours || 6;
-    return payrollPolicy.fullDayShiftHours || 10;
-  };
-
   // Revenue bucketed by shift hours
   const shiftRevenue = { morning: 0, afternoon: 0, evening: 0, night: 0 };
   bills.forEach((b) => {
@@ -430,11 +432,8 @@ export const getStaffProductivityService = async (
       ? Math.round((daysPresent / s.attendances.length) * 100)
       : 0;
     const monthlySalary = s.salary || 0;
-    const standardHours = getStandardShiftHours(s.shift);
-    const hourlyRate = standardHours > 0 ? monthlySalary / (30 * standardHours) : 0;
-    const overtimeCost = Math.round(
-      overtimeHours * hourlyRate * payrollPolicy.overtimeRateMultiplier,
-    );
+    const standardHours = computeStandardShiftHours(s.shift, payrollPolicy);
+    const overtimeCost = computeOvertimeCost(monthlySalary, standardHours, overtimeHours, payrollPolicy.overtimeRateMultiplier);
 
     return {
       id: s.id, name: s.name, role: s.role,
@@ -567,7 +566,9 @@ export const getRevenueForecastService = async (
 
 // ─── 6. Menu Engineering (Kasavana & Smith matrix: Stars/Plowhorses/Puzzles/Dogs) ─
 
-const recipeCostOf = (menuItem: {
+// Exported for reuse by the finance module (period-accurate food cost =
+// recipe cost per dish × quantity actually sold in the period).
+export const recipeCostOf = (menuItem: {
   menuItemIngredients: {
     quantity: number;
     unit: string;

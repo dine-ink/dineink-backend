@@ -1,4 +1,5 @@
 import prisma from "../../config/prisma";
+import { ForbiddenError } from "./attendance.validation";
 
 export const getAttendanceByBranchService = async (
   branchId: number,
@@ -91,15 +92,22 @@ export const getMonthlyAttendanceService = async (
 // the POS app uses, normalizing `date` to local midnight the same way
 // loginAttendanceService does, so editing an existing day updates that row
 // instead of creating a duplicate.
-export const upsertManualAttendanceService = async (data: {
-  userId: number;
-  restaurantId: number;
-  branchId: number;
-  date: string; // "YYYY-MM-DD"
-  manualTotalHours?: number | null;
-  overtimeHours?: number;
-  status?: string;
-}) => {
+export const upsertManualAttendanceService = async (
+  callerRestaurantId: number,
+  data: {
+    userId: number;
+    branchId: number;
+    date: string; // "YYYY-MM-DD"
+    manualTotalHours?: number | null;
+    overtimeHours?: number;
+    status?: string;
+  },
+) => {
+  const user = await prisma.user.findUnique({ where: { id: data.userId }, select: { restaurantId: true } });
+  if (!user || user.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this employee");
+  const branch = await prisma.branch.findUnique({ where: { id: Number(data.branchId) }, select: { restaurantId: true } });
+  if (!branch || branch.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this branch");
+
   const day = new Date(data.date);
   day.setHours(0, 0, 0, 0);
 
@@ -118,7 +126,7 @@ export const upsertManualAttendanceService = async (data: {
     },
     create: {
       userId: data.userId,
-      restaurantId: data.restaurantId,
+      restaurantId: callerRestaurantId,
       branchId: data.branchId,
       date: day,
       manualTotalHours,

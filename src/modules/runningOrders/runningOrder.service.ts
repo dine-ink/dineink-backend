@@ -375,7 +375,7 @@ export const closeRunningOrderService = async (data: any) => {
     // changes are rolled back automatically if bill creation fails.
     const customer = customerPhone
       ? await tx.customer.upsert({
-          where: { phone: customerPhone },
+          where: { restaurantId_phone: { restaurantId: primary.restaurantId, phone: customerPhone } },
           update: {},
           create: {
             name: customerName || "",

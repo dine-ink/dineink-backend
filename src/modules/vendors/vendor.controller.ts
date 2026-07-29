@@ -11,6 +11,15 @@ import {
   getVendorPerformanceService,
   getVendorInvoiceActivityService,
 } from "./vendor.service";
+import { ForbiddenError } from "./vendor.validation";
+
+const handleError = (error: any, res: Response, message: string) => {
+  console.log(error);
+  if (error instanceof ForbiddenError) {
+    return res.status(403).json({ success: false, message: error.message });
+  }
+  return res.status(500).json({ success: false, message: error.message || message });
+};
 
 export const getVendorPayments = async (req: Request, res: Response) => {
   try {
@@ -23,24 +32,22 @@ export const getVendorPayments = async (req: Request, res: Response) => {
   }
 };
 
-export const createVendorPayment = async (req: Request, res: Response) => {
+export const createVendorPayment = async (req: any, res: Response) => {
   try {
-    const data = await createVendorPaymentService(req.body);
+    const data = await createVendorPaymentService(Number(req.user.restaurantId), req.body);
     return res.status(201).json({ success: true, data });
-  } catch (err) {
-    console.log(err);
-    return res.status(500).json({ success: false, message: "Failed to record payment" });
+  } catch (err: any) {
+    return handleError(err, res, "Failed to record payment");
   }
 };
 
-export const deleteVendorPayment = async (req: Request, res: Response) => {
+export const deleteVendorPayment = async (req: any, res: Response) => {
   try {
     const id = Number(req.params.id);
-    await deleteVendorPaymentService(id);
+    await deleteVendorPaymentService(Number(req.user.restaurantId), id);
     return res.json({ success: true });
-  } catch (err) {
-    console.log(err);
-    return res.status(500).json({ success: false, message: "Failed to delete payment" });
+  } catch (err: any) {
+    return handleError(err, res, "Failed to delete payment");
   }
 };
 
@@ -55,36 +62,33 @@ export const getVendorInvoices = async (req: Request, res: Response) => {
   }
 };
 
-export const createVendorInvoice = async (req: Request, res: Response) => {
+export const createVendorInvoice = async (req: any, res: Response) => {
   try {
-    const data = await createVendorInvoiceService(req.body);
+    const data = await createVendorInvoiceService(Number(req.user.restaurantId), req.body);
     return res.status(201).json({ success: true, data });
-  } catch (err) {
-    console.log(err);
-    return res.status(500).json({ success: false, message: "Failed to create invoice" });
+  } catch (err: any) {
+    return handleError(err, res, "Failed to create invoice");
   }
 };
 
-export const payVendorInvoice = async (req: Request, res: Response) => {
+export const payVendorInvoice = async (req: any, res: Response) => {
   try {
     const id = Number(req.params.id);
     const { amount } = req.body;
-    const data = await payVendorInvoiceService(id, Number(amount));
+    const data = await payVendorInvoiceService(Number(req.user.restaurantId), id, Number(amount));
     return res.json({ success: true, data });
   } catch (err: any) {
-    console.log(err);
-    return res.status(500).json({ success: false, message: err.message });
+    return handleError(err, res, "Failed to update invoice");
   }
 };
 
-export const deleteVendorInvoice = async (req: Request, res: Response) => {
+export const deleteVendorInvoice = async (req: any, res: Response) => {
   try {
     const id = Number(req.params.id);
-    await deleteVendorInvoiceService(id);
+    await deleteVendorInvoiceService(Number(req.user.restaurantId), id);
     return res.json({ success: true });
-  } catch (err) {
-    console.log(err);
-    return res.status(500).json({ success: false, message: "Failed to delete invoice" });
+  } catch (err: any) {
+    return handleError(err, res, "Failed to delete invoice");
   }
 };
 

@@ -2,7 +2,6 @@ import { Router } from "express";
 import {
   getBranchDashboardOverview,
   getBranchInsights,
-  getDashboardOverview,
   getRestaurantDashboardOverview,
   getRestaurantInsights,
   saveRestaurantInsights,
@@ -26,7 +25,6 @@ router.get("/:restaurantId/:branchId/branchDashboardOverview", authMiddleware, r
 router.post("/insights", authMiddleware, saveRestaurantInsights);
 router.get("/insights/:restaurantId/:branchId", authMiddleware, requireOwnRestaurant(), getBranchInsights);
 router.get("/:restaurantId/getRestaurantInsights", authMiddleware, requireOwnRestaurant(), getRestaurantInsights);
-router.get("/dashboardOverview", authMiddleware, getDashboardOverview);
 
 // Branch & City comparison analytics
 router.get("/:restaurantId/branch-comparison", authMiddleware, requireOwnRestaurant(), getBranchComparison);

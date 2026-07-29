@@ -7,15 +7,18 @@ export const getExpensesReportService = async (
   from?: string,
   to?: string,
 ) => {
-  const dateFilter =
-    from && to
-      ? {
-          expenseDate: {
-            gte: new Date(from),
-            lte: new Date(to + "T23:59:59.999Z"),
-          },
-        }
-      : {};
+  // Every real caller passes from/to (the global date-range picker) — this
+  // fallback only guards against a missing/malformed query param ever
+  // returning the branch's entire expense history unbounded.
+  const defaultFrom = new Date();
+  defaultFrom.setFullYear(defaultFrom.getFullYear() - 1);
+
+  const dateFilter = {
+    expenseDate: {
+      gte: from ? new Date(from) : defaultFrom,
+      lte: to ? new Date(to + "T23:59:59.999Z") : new Date(),
+    },
+  };
 
   return prisma.shopExpense.findMany({
     where: { branchId, ...dateFilter },
@@ -41,10 +44,19 @@ export const getGstFilingReportService = async (
   from?: string,
   to?: string,
 ) => {
-  const dateFilter =
-    from && to
-      ? { createdAt: { gte: new Date(from), lte: new Date(to + "T23:59:59.999Z") } }
-      : {};
+  // Every real caller passes from/to (the global date-range picker) — this
+  // fallback only guards against a missing/malformed query param ever
+  // returning the branch's entire paid-bill history unbounded, matching the
+  // same defensive default already used by getExpensesReportService above.
+  const defaultFrom = new Date();
+  defaultFrom.setFullYear(defaultFrom.getFullYear() - 1);
+
+  const dateFilter = {
+    createdAt: {
+      gte: from ? new Date(from) : defaultFrom,
+      lte: to ? new Date(to + "T23:59:59.999Z") : new Date(),
+    },
+  };
 
   const [restaurant, branch, billingSettings, bills] = await Promise.all([
     prisma.restaurant.findUnique({

@@ -1,9 +1,20 @@
 import bcrypt from "bcryptjs";
 import prisma from "../../config/prisma";
 import { generateToken } from "../../utils/generateToken/generateToken";
+import { ForbiddenError } from "./restaurant.validation";
 
 export const setupRestaurantService = async (userId: number, body: any) => {
   const { restaurant, branches, staff, categories } = body;
+
+  // Same rule createStaffService enforces for staff added after setup — a
+  // staff member with login access needs a real password, not the "1234"
+  // placeholder below (which only exists to satisfy the NOT NULL column for
+  // roster entries that can never log in, per hasLogin's check in auth.service.ts).
+  for (const member of staff || []) {
+    if (member.hasLogin && (!member.password || member.password.length < 6)) {
+      throw new Error("Password must be at least 6 characters for staff with login access");
+    }
+  }
 
   // Pre-hash passwords before the transaction (CPU-intensive, not a DB call)
   const staffWithPasswords = await Promise.all(
@@ -378,7 +389,13 @@ export const getRestaurantInsights = async (
   });
 };
 
-export const createRestaurantTableService = async (body: any) => {
+export const createRestaurantTableService = async (callerRestaurantId: number, body: any) => {
+  // The target branch must belong to the caller's own restaurant — otherwise
+  // an authenticated user at Restaurant A could create a table on a branch
+  // belonging to Restaurant B just by supplying a different branchId.
+  const branch = await prisma.branch.findUnique({ where: { id: Number(body.branchId) }, select: { restaurantId: true } });
+  if (!branch || branch.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this branch");
+
   // Run existence check + parent table lookup in parallel
   const [existing, parentTable] = await Promise.all([
     prisma.restaurantTable.findFirst({
@@ -395,6 +412,7 @@ export const createRestaurantTableService = async (body: any) => {
 
   if (body.isTemporary && body.tempTableType === "SPLIT") {
     if (!parentTable) throw new Error("Parent table not found");
+    if (parentTable.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this table");
     if (Number(body.capacity) > (parentTable.capacity || 0)) {
       throw new Error("Not enough seats available");
     }
@@ -408,7 +426,8 @@ export const createRestaurantTableService = async (body: any) => {
       isTemporary: body.isTemporary || false,
       tempTableType: body.tempTableType || null,
       parentTableIds: body.parentTableIds || null,
-      restaurantId: Number(body.restaurantId),
+      // Never trust a client-supplied restaurantId — always the caller's own.
+      restaurantId: callerRestaurantId,
       branch: { connect: { id: Number(body.branchId) } },
     },
   });
@@ -431,14 +450,20 @@ export const createRestaurantTableService = async (body: any) => {
   return table;
 };
 
-export const createStaffService = async (data: any) => {
+export const createStaffService = async (callerRestaurantId: number, data: any) => {
   if (data.hasLogin && (!data.password || data.password.length < 6)) {
     throw new Error("Password must be at least 6 characters for staff with login access");
+  }
+  // A staff member's branch, if given, must belong to the caller's own
+  // restaurant — never trust a client-supplied restaurantId for the new hire.
+  if (data.branchId) {
+    const branch = await prisma.branch.findUnique({ where: { id: Number(data.branchId) }, select: { restaurantId: true } });
+    if (!branch || branch.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this branch");
   }
   const hashedPassword = await bcrypt.hash(data.password || "1234", 10);
   return prisma.user.create({
     data: {
-      restaurantId: data.restaurantId ? Number(data.restaurantId) : null,
+      restaurantId: callerRestaurantId,
       branchId:     data.branchId     ? Number(data.branchId)     : null,
       name: data.name,
       email: data.email || null,
@@ -454,7 +479,13 @@ export const createStaffService = async (data: any) => {
   });
 };
 
-export const updateStaffService = async (userId: number, data: any) => {
+export const updateStaffService = async (callerRestaurantId: number, userId: number, data: any) => {
+  const target = await prisma.user.findUnique({ where: { id: userId }, select: { restaurantId: true } });
+  if (!target || target.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this staff member");
+  if (data.branchId) {
+    const branch = await prisma.branch.findUnique({ where: { id: Number(data.branchId) }, select: { restaurantId: true } });
+    if (!branch || branch.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this branch");
+  }
   const updateData: any = {
     name: data.name,
     email: data.email || null,
@@ -471,7 +502,7 @@ export const updateStaffService = async (userId: number, data: any) => {
   return prisma.user.update({ where: { id: userId }, data: updateData });
 };
 
-export const deleteRestaurantTableService = async (id: number) => {
+export const deleteRestaurantTableService = async (callerRestaurantId: number, id: number) => {
   // Check table existence + active order in parallel
   const [table, activeOrder] = await Promise.all([
     prisma.restaurantTable.findUnique({ where: { id } }),
@@ -479,6 +510,7 @@ export const deleteRestaurantTableService = async (id: number) => {
   ]);
 
   if (!table) throw new Error("Table not found");
+  if (table.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this table");
   if (activeOrder) throw new Error("Cannot delete active table");
 
   if (table.isTemporary && table.tempTableType === "SPLIT") {
@@ -514,29 +546,42 @@ export const getCategoriesService = async (restaurantId: number) => {
   });
 };
 
-export const createCategoryService = async (data: { restaurantId: number; name: string; icon?: string }) => {
+export const createCategoryService = async (callerRestaurantId: number, data: { name: string; icon?: string }) => {
   return prisma.category.create({
-    data: { restaurantId: data.restaurantId, name: data.name, icon: data.icon || null },
+    data: { restaurantId: callerRestaurantId, name: data.name, icon: data.icon || null },
   });
 };
 
-export const updateCategoryService = async (id: number, data: { name?: string; icon?: string }) => {
+const findOwnedCategory = async (callerRestaurantId: number, id: number) => {
+  const category = await prisma.category.findUnique({ where: { id }, select: { restaurantId: true } });
+  if (!category) throw new Error("Category not found");
+  if (category.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this category");
+};
+
+export const updateCategoryService = async (callerRestaurantId: number, id: number, data: { name?: string; icon?: string }) => {
+  await findOwnedCategory(callerRestaurantId, id);
   return prisma.category.update({
     where: { id },
     data: { name: data.name, icon: data.icon },
   });
 };
 
-export const deleteCategoryService = async (id: number) => {
+export const deleteCategoryService = async (callerRestaurantId: number, id: number) => {
+  await findOwnedCategory(callerRestaurantId, id);
   return prisma.category.update({ where: { id }, data: { isDeleted: true } });
 };
 
 // ── MenuItem CRUD ────────────────────────────────────────────────────────────
 
-export const createMenuItemService = async (data: any) => {
+export const createMenuItemService = async (callerRestaurantId: number, data: any) => {
+  if (data.categoryId) await findOwnedCategory(callerRestaurantId, Number(data.categoryId));
+  if (data.branchId) {
+    const branch = await prisma.branch.findUnique({ where: { id: Number(data.branchId) }, select: { restaurantId: true } });
+    if (!branch || branch.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this branch");
+  }
   return prisma.menuItem.create({
     data: {
-      restaurantId: data.restaurantId,
+      restaurantId: callerRestaurantId,
       branchId:     data.branchId     ? Number(data.branchId)     : null,
       categoryId:   data.categoryId   ? Number(data.categoryId)   : null,
       name:         data.name,
@@ -550,7 +595,15 @@ export const createMenuItemService = async (data: any) => {
   });
 };
 
-export const updateMenuItemService = async (id: number, data: any) => {
+const findOwnedMenuItem = async (callerRestaurantId: number, id: number) => {
+  const menuItem = await prisma.menuItem.findUnique({ where: { id }, select: { restaurantId: true } });
+  if (!menuItem) throw new Error("Menu item not found");
+  if (menuItem.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this menu item");
+};
+
+export const updateMenuItemService = async (callerRestaurantId: number, id: number, data: any) => {
+  await findOwnedMenuItem(callerRestaurantId, id);
+  if (data.categoryId) await findOwnedCategory(callerRestaurantId, Number(data.categoryId));
   const update: any = {};
   if (data.name       !== undefined) update.name        = data.name;
   if (data.description !== undefined) update.description = data.description || null;
@@ -576,7 +629,8 @@ export const updateMenuItemService = async (id: number, data: any) => {
   });
 };
 
-export const deleteMenuItemService = async (id: number) => {
+export const deleteMenuItemService = async (callerRestaurantId: number, id: number) => {
+  await findOwnedMenuItem(callerRestaurantId, id);
   return prisma.menuItem.update({ where: { id }, data: { isDeleted: true } });
 };
 

@@ -18,6 +18,14 @@ import sopRoutes from "../modules/sop/sop.routes";
 import addonRoutes from "../modules/addons/addon.routes";
 import discountRoutes from "../modules/discounts/discount.routes";
 import procurementRoutes from "../modules/procurement/procurement.routes";
+import financeRoutes from "../modules/finance/finance.routes";
+import financeAssumptionsRoutes from "../modules/financeAssumptions/financeAssumptions.routes";
+import budgetRoutes from "../modules/budget/budget.routes";
+import scenarioRoutes from "../modules/scenario/scenario.routes";
+import forecastRoutes from "../modules/forecast/forecast.routes";
+import investmentRoutes from "../modules/investment/investment.routes";
+import executiveRoutes from "../modules/executive/executive.routes";
+import aiRoutes from "../modules/ai/ai.routes";
 
 const router = express.Router();
 
@@ -40,5 +48,13 @@ router.use("/sop", sopRoutes);
 router.use("/addons", addonRoutes);
 router.use("/discounts", discountRoutes);
 router.use("/procurement", procurementRoutes);
+router.use("/finance", financeRoutes);
+router.use("/finance-assumptions", financeAssumptionsRoutes);
+router.use("/budgets", budgetRoutes);
+router.use("/scenarios", scenarioRoutes);
+router.use("/forecasts", forecastRoutes);
+router.use("/investments", investmentRoutes);
+router.use("/executive", executiveRoutes);
+router.use("/ai", aiRoutes);
 
 export default router;

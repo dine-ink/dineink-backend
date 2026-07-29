@@ -2,12 +2,12 @@ import { Request, Response } from "express";
 
 import {
   getBranchInsightsData,
-  getDashboardOverviewDataService,
   getDashboardOverviewService,
   getRestaurantInsightsData,
   saveRestaurantInsightsData,
   getTableOperationsService,
 } from "./analytics.service";
+import { ForbiddenError } from "./analytics.validation";
 import {
   getBranchComparisonService,
   getCityComparisonService,
@@ -89,16 +89,18 @@ export const getBranchDashboardOverview = async (
   }
 };
 
-export const saveRestaurantInsights = async (req: Request, res: Response) => {
+export const saveRestaurantInsights = async (req: any, res: Response) => {
   try {
-    const data = req.body;
-    const insights = await saveRestaurantInsightsData(data);
+    const insights = await saveRestaurantInsightsData(Number(req.user.restaurantId), req.body);
     return res.json({
       success: true,
       data: insights,
     });
-  } catch (err) {
+  } catch (err: any) {
     console.log(err);
+    if (err instanceof ForbiddenError) {
+      return res.status(403).json({ success: false, message: err.message });
+    }
     return res.status(500).json({
       success: false,
       message: "Failed to save insights",
@@ -164,16 +166,6 @@ export const getRestaurantInsights = async (req: Request, res: Response) => {
       success: false,
       message: "Failed to fetch restaurant insights",
     });
-  }
-};
-
-export const getDashboardOverview = async (req: Request, res: Response) => {
-  try {
-    const range = req.query.range as string;
-    const data = await getDashboardOverviewDataService(range);
-    return res.status(200).json({ success: true, data });
-  } catch (error: any) {
-    return res.status(400).json({ success: false, message: error.message });
   }
 };
 

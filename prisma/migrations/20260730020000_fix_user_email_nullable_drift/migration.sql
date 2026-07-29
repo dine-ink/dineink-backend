@@ -1,0 +1,11 @@
+-- Schema drift found during release hardening: schema.prisma has declared
+-- User.email as nullable (String?) for a long time — every service that
+-- creates a User (restaurant.service.ts's createStaffService in particular)
+-- already writes `email: data.email || null`, clearly intending staff
+-- without an email (phone-only staff) to be supported. But the live
+-- database column was still NOT NULL from the very first migration, and no
+-- later migration ever relaxed it — so creating a staff member with no
+-- email has been silently failing (Prisma P2011) in production this whole
+-- time. This migration brings the database in line with the schema (and
+-- the app's own already-written business logic), not the other way around.
+ALTER TABLE "User" ALTER COLUMN "email" DROP NOT NULL;

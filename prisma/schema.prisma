@@ -8,16 +8,6 @@ datasource db {
   provider = "postgresql"
 }
 
-enum OrderStatus {
-  PENDING
-  ACCEPTED
-  PREPARING
-  READY
-  OUT_FOR_DELIVERY
-  COMPLETED
-  CANCELLED
-}
-
 enum BillStatus {
   UNPAID
   PAID
@@ -46,7 +36,6 @@ model Restaurant {
   customers            Customer[]
   bills                Bill[]
   runningOrders        RunningOrder[]
-  orders               Order[]
   logo                 String?
   ingredientCategories IngredientCategory[]
   ingredients          Ingredient[]
@@ -61,6 +50,14 @@ model Restaurant {
   sopChecklists            SopChecklist[]
   addOnGroups              AddOnGroup[]
   discountCodes            DiscountCode[]
+  financialAssumptions     FinancialAssumptions[]
+  budgets                  Budget[]
+  financialScenarios       FinancialScenario[]
+  financialForecasts       FinancialForecast[]
+  investmentProjects       InvestmentProject[]
+  executiveKpiTargets      ExecutiveKpiTarget[]
+  userDashboardPreferences UserDashboardPreference[]
+  aiInsightLogs            AIInsightLog[]
 
   @@index([ownerId])
 }
@@ -98,7 +95,6 @@ model Branch {
   restaurant           Restaurant            @relation(fields: [restaurantId], references: [id])
   users                User[]
   bills                Bill[]
-  orders               Order[]
   runningOrders        RunningOrder[]
   isDeleted            Boolean               @default(false)
   inventoryRestocks    InventoryRestock[]
@@ -114,6 +110,13 @@ model Branch {
   vendorInvoices       VendorInvoice[]
   dailyStockAudits     DailyStockAudit[]
   sopChecklists        SopChecklist[]
+  financialAssumptions FinancialAssumptions[]
+  budgets              Budget[]
+  financialScenarios   FinancialScenario[]
+  financialForecasts   FinancialForecast[]
+  investmentProjects   InvestmentProject[]
+  executiveKpiTargets  ExecutiveKpiTarget[]
+  aiInsightLogs        AIInsightLog[]
 
   @@index([restaurantId])
 }
@@ -144,6 +147,15 @@ model User {
   attendances                 Attendance[]
   paidExpenses                ShopExpense[]         @relation("ExpensePaidByUser")
   inventoryAdjustmentsUpdated InventoryAdjustment[] @relation("InventoryUpdatedBy")
+  financialAssumptionsUpdated FinancialAssumptions[] @relation("FinancialAssumptionsUpdatedBy")
+  budgetsCreated              Budget[]                @relation("BudgetCreatedBy")
+  budgetsUpdated              Budget[]                @relation("BudgetUpdatedBy")
+  financialScenariosCreated   FinancialScenario[]     @relation("FinancialScenarioCreatedBy")
+  financialScenariosUpdated   FinancialScenario[]     @relation("FinancialScenarioUpdatedBy")
+  financialForecastsCreated   FinancialForecast[]     @relation("FinancialForecastCreatedBy")
+  investmentProjectsCreated   InvestmentProject[]     @relation("InvestmentProjectCreatedBy")
+  executiveKpiTargetsUpdated  ExecutiveKpiTarget[]    @relation("ExecutiveKpiTargetUpdatedBy")
+  dashboardPreference         UserDashboardPreference?
 }
 
 model EmailOtp {
@@ -295,7 +307,16 @@ model MenuItemAddOnGroup {
 model Customer {
   id           Int        @id @default(autoincrement())
   name         String
-  phone        String     @unique
+  // Scoped per restaurant, not globally unique — a phone number can be a
+  // real customer at more than one independent restaurant. A bare global
+  // @unique here previously meant the checkout upsert (which matched on
+  // phone alone) could silently attach one restaurant's existing Customer
+  // row — name, address, visit history — to a bill placed at a completely
+  // different restaurant the first time the two happened to share a phone
+  // number. Confirmed via a live production check that no rows have
+  // actually collided yet (0 phones shared across restaurants as of this
+  // fix), so this tightening needed no data backfill.
+  phone        String
   email        String?
   address      String?
   restaurantId Int
@@ -303,6 +324,8 @@ model Customer {
   updatedAt    DateTime   @updatedAt
   restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
   bills        Bill[]
+
+  @@unique([restaurantId, phone])
 }
 
 model Bill {
@@ -556,44 +579,6 @@ model RunningOrderBatchItemAddOn {
   @@index([runningOrderBatchItemId])
 }
 
-model Order {
-  id           Int         @id @default(autoincrement())
-  orderNo      String      @unique
-  restaurantId Int
-  branchId     Int
-  tableId      Int?
-  customerId   Int?
-  status       OrderStatus
-  orderType    String
-  subtotal     Float
-  gst          Float
-  discount     Float
-  total        Float
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  branch     Branch      @relation(fields: [branchId], references: [id])
-  restaurant Restaurant  @relation(fields: [restaurantId], references: [id])
-  items      OrderItem[]
-
-  @@index([restaurantId])
-  @@index([branchId])
-}
-
-model OrderItem {
-  id         Int      @id @default(autoincrement())
-  orderId    Int
-  menuItemId Int?
-  itemName   String
-  quantity   Int
-  price      Float
-  total      Float
-  createdAt  DateTime @default(now())
-
-  order Order @relation(fields: [orderId], references: [id])
-}
-
 model IngredientCategory {
   id           Int          @id @default(autoincrement())
   name         String
@@ -623,6 +608,12 @@ model Ingredient {
   inventoryAdjustments InventoryAdjustment[]
   priceHistory         IngredientPriceHistory[]
   dailyStockAudits     DailyStockAudit[]
+
+  // restaurantId is the filter on nearly every read in ingredient.service.ts
+  // (list, reorder-alert scan, vendor-catalog-import name dedup) — all were
+  // full-table scans of an unindexed foreign key before this.
+  @@index([restaurantId])
+  @@index([restaurantId, categoryId])
 }
 
 model IngredientVendor {
@@ -729,6 +720,480 @@ model RestaurantInsights {
   @@unique([restaurantId, branchId])
 }
 
+/**
+ * The single configurable source for every financial target/rate/percentage
+ * assumption used by the finance engine (finance.formulas.ts /
+ * finance.service.ts) and everything built on top of it — ratio engine,
+ * financial statements, budget/scenario/forecast features. Distinct from
+ * RestaurantInsights, which holds the actual monthly ₹ expense figures
+ * (rent paid, utility bills, etc.) that feed the same engine — this model
+ * holds the *rates and targets*, not actuals.
+ *
+ * Two-tier resolution, done in financeAssumptions.service.ts, NOT in the
+ * database: one row per restaurant with branchId = null is the restaurant
+ * default; branches may have an additional row (branchId set) whose non-null
+ * fields override the default field-by-field. There is intentionally no
+ * database-level constraint enforcing "at most one default row per
+ * restaurant" (Postgres unique indexes treat multiple NULLs as distinct, and
+ * a partial/filtered unique index isn't expressible in schema.prisma without
+ * risking the migration-drift issues this project has already hit) — the
+ * service layer enforces it via find-then-upsert.
+ */
+model FinancialAssumptions {
+  id           Int @id @default(autoincrement())
+  restaurantId Int
+  /** null = restaurant-level default. Set = this branch's override row. */
+  branchId     Int?
+
+  /**
+   * PROPERTY / OCCUPANCY
+   */
+  rentPerSqFt        Float?
+  camPerSqFt         Float?
+  chargeableAreaSqFt Float?
+
+  /**
+   * TARGETS
+   */
+  foodCostTargetPercentage  Float?
+  labourTargetPercentage    Float?
+  primeCostTargetPercentage Float?
+  ebitdaTargetPercentage    Float?
+  occupancyTargetPercentage Float?
+  utilityTargetPercentage   Float?
+
+  /**
+   * CHANNEL MIX & COMMISSION
+   */
+  deliveryPercentage         Float?
+  swiggyCommissionPercentage Float?
+  zomatoCommissionPercentage Float?
+
+  /**
+   * FRANCHISE / ROYALTY
+   */
+  franchiseFeePercentage Float?
+  royaltyPercentage      Float?
+  marketingFeePercentage Float?
+
+  /**
+   * ESCALATION
+   */
+  salaryIncrementPercentage Float?
+  rentEscalationPercentage  Float?
+  inflationPercentage       Float?
+
+  /**
+   * TAX & OPERATING CALENDAR
+   */
+  gstPercentage Float?
+  workingDays   Int?
+  /** Hours the restaurant operates per day, e.g. 12.5. */
+  businessHours Float?
+
+  updatedById Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id])
+  updatedBy  User?      @relation("FinancialAssumptionsUpdatedBy", fields: [updatedById], references: [id])
+
+  @@unique([restaurantId, branchId])
+  @@index([restaurantId])
+  @@index([branchId])
+}
+
+enum BudgetStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+/**
+ * A budget header — restaurant-wide (branchId = null) or scoped to one
+ * branch. Financial Year follows the same convention as InvoiceSequence
+ * (the FY's starting calendar year, e.g. "2026" = FY 2026-27, Apr–Mar).
+ * "Duplicate" and "copy previous year" are just creating another Budget row
+ * with copied BudgetItems — there is deliberately no separate version-history
+ * model, since nothing in the spec calls for browsing/diffing past versions.
+ */
+model Budget {
+  id            Int          @id @default(autoincrement())
+  restaurantId  Int
+  branchId      Int?
+  financialYear String
+  name          String
+  notes         String?
+  status        BudgetStatus @default(DRAFT)
+
+  createdById Int?
+  updatedById Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant Restaurant   @relation(fields: [restaurantId], references: [id])
+  branch     Branch?      @relation(fields: [branchId], references: [id])
+  createdBy  User?        @relation("BudgetCreatedBy", fields: [createdById], references: [id])
+  updatedBy  User?        @relation("BudgetUpdatedBy", fields: [updatedById], references: [id])
+  items      BudgetItem[]
+
+  @@index([restaurantId])
+  @@index([branchId])
+  @@index([restaurantId, financialYear])
+}
+
+/**
+ * One line item = one budget category for one calendar month. `category` is
+ * a plain string (validated against BUDGET_CATEGORIES in budget.types.ts),
+ * not a DB enum, so new budgetable categories don't require a migration.
+ * `year`/`month` are the actual calendar month (not "FY month 1-12") so they
+ * map directly onto the finance engine's period resolution with no
+ * translation step.
+ */
+model BudgetItem {
+  id       Int     @id @default(autoincrement())
+  budgetId Int
+  category String
+  year     Int
+  month    Int
+  amount   Float
+  notes    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  budget Budget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+
+  @@unique([budgetId, category, year, month])
+  @@index([budgetId])
+}
+
+enum ScenarioType {
+  CONSERVATIVE
+  EXPECTED
+  OPTIMISTIC
+  CUSTOM
+}
+
+/**
+ * A named "what-if" planning scenario — restaurant-wide (branchId = null) or
+ * scoped to one branch. Every override field mirrors FinancialAssumptions'
+ * naming where the concept already exists there (foodCostTargetPercentage,
+ * labourTargetPercentage, deliveryPercentage, the commission/fee/escalation
+ * percentages, workingDays, businessHours) — a scenario "inherits" from the
+ * resolved FinancialAssumptions for fields it doesn't override, exactly like
+ * a branch inherits from the restaurant default there. The remaining fields
+ * (revenueGrowthPercentage, orderGrowthPercentage, avgOrderValue, rent,
+ * utilities, marketing, maintenance, packaging) are new — either genuine
+ * what-if deltas with no steady-state equivalent, or absolute ₹ overrides of
+ * the actual expense figures the Finance Engine would otherwise use.
+ *
+ * A scenario is purely a saved set of INPUT overrides. It never stores a
+ * calculated/projected value — those are always computed fresh by the
+ * What-If Engine at read time and discarded, per the "never persist
+ * projected financial values" requirement.
+ *
+ * No ScenarioVersion model: cloning a scenario is just creating another
+ * FinancialScenario row with copied override values, the same pattern
+ * Budget's "duplicate" uses — nothing here calls for browsing/diffing a
+ * version history.
+ */
+model FinancialScenario {
+  id           Int          @id @default(autoincrement())
+  restaurantId Int
+  branchId     Int?
+  name         String
+  description  String?
+  type         ScenarioType @default(CUSTOM)
+  isActive     Boolean      @default(true)
+
+  /**
+   * WHAT-IF DELTAS (no steady-state equivalent in FinancialAssumptions)
+   */
+  revenueGrowthPercentage Float?
+  orderGrowthPercentage   Float?
+  avgOrderValue           Float?
+
+  /**
+   * ABSOLUTE ₹ OVERRIDES (of the actual expense figures, not a rate/target)
+   */
+  rent        Float?
+  utilities   Float?
+  marketing   Float?
+  maintenance Float?
+  packaging   Float?
+
+  /**
+   * RATE/TARGET OVERRIDES — same field names as FinancialAssumptions;
+   * inherited from the resolved assumptions when left null here.
+   */
+  foodCostTargetPercentage   Float?
+  labourTargetPercentage     Float?
+  deliveryPercentage         Float?
+  swiggyCommissionPercentage Float?
+  zomatoCommissionPercentage Float?
+  royaltyPercentage          Float?
+  franchiseFeePercentage     Float?
+  salaryIncrementPercentage  Float?
+  inflationPercentage        Float?
+  rentEscalationPercentage   Float?
+  workingDays                Int?
+  businessHours              Float?
+
+  createdById Int?
+  updatedById Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id])
+  createdBy  User?      @relation("FinancialScenarioCreatedBy", fields: [createdById], references: [id])
+  updatedBy  User?      @relation("FinancialScenarioUpdatedBy", fields: [updatedById], references: [id])
+
+  @@index([restaurantId])
+  @@index([branchId])
+  @@index([restaurantId, type])
+}
+
+enum ForecastPeriodType {
+  NEXT_WEEK
+  NEXT_MONTH
+  NEXT_QUARTER
+  NEXT_6_MONTHS
+  NEXT_YEAR
+}
+
+enum ForecastModelType {
+  HISTORICAL_TREND
+  MOVING_AVERAGE
+  SEASONAL
+}
+
+/**
+ * A frozen snapshot of a generated forecast — unlike Scenario (which never
+ * persists a projected value, by design, since a what-if is infinitely
+ * re-runnable), Forecast has an explicit spec requirement (Phase 5 §5,
+ * "Forecast vs Actual") to compare a PAST prediction against the actual that
+ * later materialized, which is only meaningful if the prediction itself is
+ * frozen at the moment it was made — recomputing it later would silently
+ * rewrite history and make "accuracy" meaningless. `predictions` is a JSON
+ * array of ForecastKpiPrediction (see forecast.types.ts) — a Json column is
+ * already an established pattern in this schema (see InventoryRestock.data),
+ * used here because the field set is a per-KPI array, not a bounded flat set
+ * of independent columns (unlike Scenario/FinancialAssumptions).
+ *
+ * Snapshots are created idempotently — at most one row per
+ * (restaurantId, branchId, periodType, targetStartDate) — the first time
+ * that exact future period is forecast for that scope (see
+ * ensureForecastSnapshotService), so viewing the dashboard naturally builds
+ * up forecast history for later accuracy scoring without a separate manual
+ * "save" step.
+ */
+model FinancialForecast {
+  id              Int                @id @default(autoincrement())
+  restaurantId    Int
+  branchId        Int?
+  periodType      ForecastPeriodType
+  model           ForecastModelType
+  targetStartDate DateTime
+  targetEndDate   DateTime
+  predictions     Json
+
+  createdById Int?
+  createdAt   DateTime @default(now())
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id])
+  createdBy  User?      @relation("FinancialForecastCreatedBy", fields: [createdById], references: [id])
+
+  @@index([restaurantId])
+  @@index([branchId])
+  @@index([restaurantId, periodType])
+  @@index([targetEndDate])
+}
+
+enum InvestmentType {
+  NEW_BRANCH
+  BRANCH_EXPANSION
+  KITCHEN_UPGRADE
+  EQUIPMENT_PURCHASE
+  INTERIOR_RENOVATION
+  DELIVERY_EXPANSION
+  MARKETING_INVESTMENT
+  FRANCHISE_OUTLET
+  CUSTOM
+}
+
+enum InvestmentStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+/**
+ * A capital investment being evaluated (a new branch, an equipment purchase,
+ * a renovation, etc.) — one flat row per project, matching FinancialScenario/
+ * FinancialAssumptions' own precedent (a bounded, non-repeating field set
+ * doesn't need a child table). Deliberately NO separate InvestmentCashFlow or
+ * InvestmentAssumption table: the year-by-year cash flow stream ROI/NPV/IRR
+ * need is computed on demand from these assumption fields (plus optional
+ * Forecast/Scenario Engine integration) by investment.formulas.ts/
+ * investment.service.ts, exactly like Scenario's What-If Engine computes
+ * projections on demand rather than persisting them — never stored, so it's
+ * always in sync with the latest assumptions. And deliberately NO separate
+ * InvestmentScenario table: "evaluate under Conservative/Expected/Optimistic/
+ * Custom" reuses the EXISTING FinancialScenario rows for the investment's
+ * branch (via an optional scenarioId passed into the metrics calculation),
+ * rather than re-implementing scenario types a second time.
+ */
+model InvestmentProject {
+  id           Int               @id @default(autoincrement())
+  restaurantId Int
+  branchId     Int?
+  name         String
+  type         InvestmentType    @default(CUSTOM)
+  description  String?
+  status       InvestmentStatus  @default(PLANNED)
+
+  initialInvestment      Float
+  plannedStartDate       DateTime
+  expectedCompletionDate DateTime?
+  projectLifeYears       Int     @default(5)
+
+  /**
+   * ASSUMPTIONS — defaults sourced from the Financial Assumptions Engine at
+   * creation time where an equivalent field exists (inflationRate <-
+   * FinancialAssumptions.inflationPercentage), otherwise a documented
+   * finance-standard fallback (discountRate defaults to 12% — this app has
+   * no existing "hurdle rate"/WACC concept anywhere to inherit from), always
+   * editable afterward and never re-synced.
+   */
+  discountRate                Float?
+  inflationRate                Float?
+  monthlyRevenueIncrease       Float?
+  revenueGrowthPercentage      Float?
+  expectedCostSavings          Float?
+  labourSavings                Float?
+  additionalOperatingExpenses  Float?
+  maintenanceCost              Float?
+  salvageValue                 Float?
+
+  createdById Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id])
+  createdBy  User?      @relation("InvestmentProjectCreatedBy", fields: [createdById], references: [id])
+
+  @@index([restaurantId])
+  @@index([branchId])
+  @@index([restaurantId, status])
+}
+
+/**
+ * A restaurant owner's customized target for one Executive KPI scorecard
+ * metric — the same two-tier restaurant-default/branch-override pattern as
+ * FinancialAssumptions/FinancialScenario. Deliberately NOT a duplicate of
+ * FinancialAssumptions' own target fields (foodCostTargetPercentage, etc.):
+ * this table is the customization LAYER over the whole scorecard KPI set,
+ * including KPIs with no native target field anywhere else in the app
+ * (Customer Growth, Repeat Customer %, Branch Count, Active Employees,
+ * Inventory Value). When resolving a KPI's target, an explicit row here
+ * always wins; otherwise the KPI's native source (FinancialAssumptions/
+ * RestaurantInsights) is used, exactly like a scenario override falls back
+ * to the resolved assumption when unset — see executive.service.ts's
+ * resolveKpiTargetService.
+ */
+model ExecutiveKpiTarget {
+  id           Int    @id @default(autoincrement())
+  restaurantId Int
+  branchId     Int?
+  kpiKey       String
+  targetValue  Float
+
+  updatedById Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id])
+  updatedBy  User?      @relation("ExecutiveKpiTargetUpdatedBy", fields: [updatedById], references: [id])
+
+  @@unique([restaurantId, branchId, kpiKey])
+  @@index([restaurantId])
+}
+
+/**
+ * One row per user — their personal Executive Dashboard layout (widget
+ * order/visibility), pinned KPIs, and default filters. Nothing here is
+ * financial data; a Json layout column matches the same established pattern
+ * as FinancialForecast.predictions/InventoryRestock.data (a per-KPI/per-
+ * widget array, not a bounded flat field set).
+ */
+model UserDashboardPreference {
+  id           Int    @id @default(autoincrement())
+  userId       Int    @unique
+  restaurantId Int
+
+  layout        Json?
+  pinnedKpis    Json?
+  defaultPeriod String?
+  defaultBranchId Int?
+
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id])
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+
+  @@index([restaurantId])
+}
+
+/**
+ * A lightweight audit log of AI-generated insights — NOT a financial data
+ * store. No number here is a new fact; `supportingMetrics`/`recommendedActions`
+ * are a frozen copy of what an existing engine (Finance/Budget/Forecast/
+ * Scenario/Investment/Executive) already computed at generation time, kept
+ * only so the "Historical Insight Timeline" (spec section 10) can show what
+ * was flagged over time. Logged idempotently — at most one row per
+ * (restaurantId, branchId, category, title, calendar day) — so repeatedly
+ * viewing the AI Advisor dashboard in the same business day doesn't spam
+ * duplicate rows; this mirrors FinancialForecast's own "idempotent snapshot
+ * on generate" precedent (Phase 5), adapted to a daily cadence instead of a
+ * forecast-target-period cadence.
+ */
+model AIInsightLog {
+  id           Int     @id @default(autoincrement())
+  restaurantId Int
+  branchId     Int?
+
+  category   String // "insight" | "anomaly" | "recommendation" | "risk" | "opportunity"
+  severity   String // "low" | "medium" | "high" | "critical" | "info"
+  title      String
+  summary    String
+  confidence String // "high" | "medium" | "low"
+
+  supportingMetrics   Json
+  recommendedActions  Json
+  relatedScreens      Json
+
+  logDate     DateTime // calendar day this insight was generated for, floored to midnight — the idempotency key alongside restaurantId/branchId/category/title
+  generatedAt DateTime @default(now())
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id])
+
+  @@index([restaurantId])
+  @@index([restaurantId, logDate])
+  @@index([restaurantId, branchId, category, title, logDate])
+}
+
 model InventoryRestock {
   id           Int  @id @default(autoincrement())
   restaurantId Int
@@ -761,6 +1226,14 @@ model MenuItemIngredient {
 
   menuItem   MenuItem   @relation(fields: [menuItemId], references: [id])
   ingredient Ingredient @relation(fields: [ingredientId], references: [id])
+
+  // menuItemId is looked up inside a held DB transaction on every bill
+  // creation and every running-order close (auto stock-deduction) — the
+  // hottest checkout-path query in the app. Postgres does not auto-index
+  // foreign keys, so this table scanned in full on every checkout before
+  // this index existed.
+  @@index([menuItemId])
+  @@index([ingredientId])
 }
 
 model Vendor {
@@ -949,6 +1422,10 @@ model DailyCashSession {
   @@index([restaurantId])
   @@index([branchId])
   @@index([openedById])
+  // Matches Bill's own restaurantId+date composite index — cash.service.ts
+  // filters/orders by businessDate the same way reports/analytics filter
+  // Bill by createdAt.
+  @@index([branchId, businessDate])
 }
 
 model ShopExpense {
@@ -983,6 +1460,10 @@ model ShopExpense {
   @@index([restaurantId])
   @@index([branchId])
   @@index([paidByUserId])
+  // Matches Bill's own restaurantId+date composite index — reports.service.ts
+  // and branchComparison.service.ts filter this table by expenseDate the
+  // same way Bill is filtered by createdAt, but had no matching index.
+  @@index([restaurantId, expenseDate])
 }
 
 model InventoryAdjustment {

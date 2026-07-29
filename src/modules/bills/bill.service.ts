@@ -22,7 +22,7 @@ export const createBillService = async (data: any) => {
   // branchData was only used for restaurantId — which is already in the payload
   const customer = customerPhone
     ? await prisma.customer.upsert({
-        where: { phone: customerPhone },
+        where: { restaurantId_phone: { restaurantId, phone: customerPhone } },
         update: {},
         create: {
           name: customerName || "",
@@ -252,12 +252,22 @@ export const getBillsService = async (
   branchId?: number,
   page = 1,
   limit = 200,
+  dateRange?: { from?: string; to?: string },
 ) => {
   const branchFilter = branchId ? { branchId } : {};
+  // Without an explicit date range, preserve the existing "most recent N"
+  // behavior exactly (no other caller passes dateRange today). When a range
+  // IS supplied, apply a real createdAt filter instead of silently
+  // truncating to the flat row cap regardless of how far back the request
+  // actually needs to look — this was previously not date-bound at all.
+  const createdAtFilter = dateRange?.from || dateRange?.to
+    ? { createdAt: { ...(dateRange.from ? { gte: new Date(dateRange.from) } : {}), ...(dateRange.to ? { lte: new Date(dateRange.to + "T23:59:59.999Z") } : {}) } }
+    : {};
+  const effectiveLimit = dateRange?.from || dateRange?.to ? Math.max(limit, 2000) : limit;
 
   const [bills, runningOrders] = await Promise.all([
     prisma.bill.findMany({
-      where: { restaurantId, ...branchFilter },
+      where: { restaurantId, ...branchFilter, ...createdAtFilter },
       select: {
         id: true,
         billNo: true,
@@ -280,8 +290,8 @@ export const getBillsService = async (
         items: { include: { addOns: true } },
       },
       orderBy: { createdAt: "desc" },
-      take: limit,
-      skip: (page - 1) * limit,
+      take: effectiveLimit,
+      skip: (page - 1) * effectiveLimit,
     }),
     prisma.runningOrder.findMany({
       // Excludes BILLED too — once a quick/takeaway order is invoiced
@@ -331,8 +341,8 @@ export const getBillsService = async (
 
 // ─── getBranchWiseBillsService ────────────────────────────────────────────────
 
-export const getBranchWiseBillsService = async (restaurantId: number, branchId: number) => {
-  return getBillsService(restaurantId, branchId);
+export const getBranchWiseBillsService = async (restaurantId: number, branchId: number, dateRange?: { from?: string; to?: string }) => {
+  return getBillsService(restaurantId, branchId, 1, 200, dateRange);
 };
 
 // ─── cancelBillService ───────────────────────────────────────────────────────
