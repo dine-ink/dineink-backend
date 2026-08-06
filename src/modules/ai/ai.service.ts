@@ -11,7 +11,7 @@
 import prisma from "../../config/prisma";
 import { PeriodKey } from "../../utils/dateRange";
 import { getBudgetVarianceService, listBudgetsService } from "../budget/budget.service";
-import { generateForecastService } from "../forecast/forecast.service";
+import { generateForecastService, getInventoryForecastService, getPeakHourForecastService } from "../forecast/forecast.service";
 import {
   getBusinessHealthScoreService,
   getExecutiveOverviewService,
@@ -33,9 +33,12 @@ import {
   foodCostTargetInsight,
   healthyMarginOpportunity,
   highGrowthBranchOpportunity,
+  growingPeakHourDemandOpportunity,
   improvingForecastTrendOpportunity,
   lowForecastConfidenceRisk,
   persistentBudgetMissRisks,
+  predictedStaffShortfallRisk,
+  predictedStockOutRisk,
   revenueChangeInsight,
   risingCostRisk,
   strongROIInvestmentOpportunities,
@@ -83,6 +86,33 @@ export const generateInsightsService = async (
   let multiBranch: any = null;
   if (branchId === null) multiBranch = await getMultiBranchExecutiveViewService(restaurantId, period, from, to);
 
+  // Peak Hour / Inventory Forecast (Phase 9) — only meaningful for a single
+  // concrete branch (order volume/staffing/consumption are inherently
+  // per-branch; see forecast.service.ts's getPeakHourForecastService/
+  // getInventoryForecastService for why branchId is required there), so
+  // skipped entirely for the restaurant-wide (branchId === null) view, same
+  // guard as multiBranch above but for the opposite scope.
+  let peakHourForecast: Awaited<ReturnType<typeof getPeakHourForecastService>> | null = null;
+  let stockOutFlagged: { ingredientName: string; unit: string | null; daysUntilStockout: number | null }[] = [];
+  let currentActiveStaffCount = 0;
+  if (branchId !== null) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+    const [peakHour, inventory, activeStaff] = await Promise.all([
+      getPeakHourForecastService(restaurantId, branchId, "NEXT_MONTH", "HISTORICAL_TREND"),
+      getInventoryForecastService(restaurantId, branchId),
+      // "Currently scheduled/active" = clocked in today with no logout yet —
+      // same today-range filter attendance.service.ts's own
+      // getAttendanceByBranchService already uses for its "today" default.
+      prisma.attendance.count({ where: { branchId, date: { gte: today, lte: todayEnd }, loginTime: { not: null }, logoutTime: null } }),
+    ]);
+    peakHourForecast = peakHour;
+    stockOutFlagged = inventory.filter((i) => i.reorderRecommended).map((i) => ({ ingredientName: i.ingredientName, unit: i.unit, daysUntilStockout: i.daysUntilStockout }));
+    currentActiveStaffCount = activeStaff;
+  }
+
   // Anomaly detection always uses the trailing 11 COMPLETE months (the
   // timeline's 12th/most-recent point is the current, still-in-progress
   // period) regardless of the requested display period — a deliberate,
@@ -121,6 +151,14 @@ export const generateInsightsService = async (
       highGrowthBranchOpportunity(multiBranch.mostImproved, ["/dashboard/comparison"]),
       branchUnderperformingPeersRisk(multiBranch.lowestPerforming, networkAverageHealth, ["/dashboard/comparison"]),
       expandHighPerformingBranchRecommendation(multiBranch.bestPerforming, ["/dashboard/investment-analysis"]),
+    );
+  }
+
+  if (peakHourForecast) {
+    insights.push(
+      predictedStockOutRisk(stockOutFlagged, ["/dashboard/inventory"]),
+      predictedStaffShortfallRisk(peakHourForecast.projectedStaffRequirement, currentActiveStaffCount, ["/dashboard/attendance", "/dashboard/forecasting"]),
+      growingPeakHourDemandOpportunity(peakHourForecast, ["/dashboard/forecasting"]),
     );
   }
 

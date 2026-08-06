@@ -28,8 +28,15 @@ import { fetchInsightsForScope, getMenuItemCostMap, getPayrollPolicyMap, resolve
 import { FinancialInputs, FinancialMetrics } from "../finance/finance.types";
 import { getRestaurantDefaultsService, getResolvedAssumptionsService } from "../financeAssumptions/financeAssumptions.service";
 import { AssumptionValues } from "../financeAssumptions/financeAssumptions.types";
+import { getCashOutflowProjectionService, CashFlowHorizon } from "../cashflow/cashflow.service";
+import { getKitchenAnalyticsService } from "../analytics/analyticsAdvanced.service";
+import { computeStaffRequirement } from "../analytics/peakHour.formulas";
+import { convertQtyToIngredientUnit } from "../inventory/inventory.service";
 import { combineConfidence, forecastSeries } from "./forecast.formulas";
 import {
+  ConfidenceLevel,
+  DemandForecastItem,
+  DemandForecastResult,
   ForecastAlert,
   ForecastGranularity,
   ForecastKpiRow,
@@ -39,6 +46,8 @@ import {
   ForecastSnapshotPayload,
   ForecastVsActualRow,
   HistoricalPoint,
+  InventoryForecastItem,
+  PeakHourForecastResult,
   SeriesForecastResult,
 } from "./forecast.types";
 import { ValidationError } from "./forecast.validation";
@@ -53,6 +62,18 @@ const HORIZON_BY_PERIOD: Record<ForecastPeriodTypeValue, { granularity: Forecast
 
 const MAX_HISTORICAL_WEEKS = 16;
 const MAX_HISTORICAL_MONTHS = 24;
+
+// Cash Flow KPI wiring: only NEXT_WEEK/NEXT_MONTH/NEXT_QUARTER map onto the
+// Cash Flow Predictor's horizon buckets (week/month/quarter, max 90 days).
+// NEXT_6_MONTHS/NEXT_YEAR are intentionally left unmapped (see the cashFlow
+// patch in generateForecastService below) — projecting vendor/EMI/payroll
+// obligations 6-12 months out via date-ranged due-date queries would be
+// noise, not signal, at that distance.
+const CASH_FLOW_HORIZON_BY_PERIOD: Partial<Record<ForecastPeriodTypeValue, CashFlowHorizon>> = {
+  NEXT_WEEK: "week",
+  NEXT_MONTH: "month",
+  NEXT_QUARTER: "quarter",
+};
 
 /** The future date range being predicted, anchored on "now". */
 export const resolveTargetRange = (periodType: ForecastPeriodTypeValue): DateRange => {
@@ -127,12 +148,13 @@ const extractSeries = (snapshots: PeriodSnapshot[], key: RawSeriesKey): Historic
     hasActivity: s.hasActivity,
   }));
 
+type KpiExtra = { rent: number | null; utilities: number | null; daysInPeriod: number | null };
 type KpiDef = {
   key: string;
   label: string;
   unit: "currency" | "percentage" | "count";
   higherIsBetter: boolean;
-  extractor: (m: FinancialMetrics, extra: { rent: number | null; utilities: number | null }) => number | null;
+  extractor: (m: FinancialMetrics, extra: KpiExtra) => number | null;
   target: (assumptions: AssumptionValues, insights: RestaurantInsightsRow | null) => number | null;
 };
 
@@ -140,6 +162,17 @@ const KPI_DEFINITIONS: KpiDef[] = [
   { key: "revenue", label: "Revenue", unit: "currency", higherIsBetter: true, extractor: (m) => m.revenue, target: (_a, i) => i?.monthlyRevenueGoal ?? null },
   { key: "orders", label: "Orders", unit: "count", higherIsBetter: true, extractor: (m) => m.orders, target: () => null },
   { key: "avgOrderValue", label: "Average Order Value", unit: "currency", higherIsBetter: true, extractor: (m) => Math.round(m.avgOrderValue), target: () => null },
+  // ADS = Average Daily Sales (revenue ÷ operating days in the period) — a
+  // distinct concept from Average Order Value (revenue ÷ orders, above).
+  // The codebase already has a "break-even ADS" (computeBreakEvenADS in
+  // finance.formulas.ts: breakEvenRevenue ÷ daysInPeriod) but no plain ADS
+  // for actual/projected revenue — this is that missing sibling, same
+  // days-in-period divisor, just applied to revenue instead of break-even
+  // revenue. daysInPeriod comes from `extra` (see KpiExtra) rather than
+  // FinancialMetrics because daysInPeriod is a FinancialInputs field, not a
+  // derived metric — same reason rent/utilities are threaded through `extra`
+  // above.
+  { key: "avgDailySales", label: "Average Daily Sales", unit: "currency", higherIsBetter: true, extractor: (m, e) => (e.daysInPeriod && e.daysInPeriod > 0 ? Math.round((m.revenue / e.daysInPeriod) * 100) / 100 : null), target: () => null },
   { key: "foodCost", label: "Food Cost", unit: "currency", higherIsBetter: false, extractor: (m) => m.foodCost, target: () => null },
   { key: "foodCostPercentage", label: "Food Cost %", unit: "percentage", higherIsBetter: false, extractor: (m) => m.foodCostPercentage, target: (a) => a.foodCostTargetPercentage },
   { key: "primeCost", label: "Prime Cost", unit: "currency", higherIsBetter: false, extractor: (m) => m.primeCost, target: () => null },
@@ -251,11 +284,12 @@ export const generateForecastService = async (
   const projectedUtilities = Math.round(seriesResults.utilities.predictedTotal);
 
   const mostRecent = snapshots[snapshots.length - 1] ?? null;
-  const baselineExtra = { rent: mostRecent?.rent ?? null, utilities: mostRecent?.utilities ?? null };
+  const mostRecentRange = ranges[ranges.length - 1] ?? null;
+  const baselineExtra: KpiExtra = { rent: mostRecent?.rent ?? null, utilities: mostRecent?.utilities ?? null, daysInPeriod: mostRecentRange ? daysInRange(mostRecentRange) : null };
   const insightsForTargets = isSingleBranchInsights(insightsData) ? insightsData : null;
 
   const kpis: ForecastKpiRow[] = KPI_DEFINITIONS.map((def) => {
-    const predicted = def.extractor(projected, { rent: projectedRent, utilities: projectedUtilities });
+    const predicted = def.extractor(projected, { rent: projectedRent, utilities: projectedUtilities, daysInPeriod: daysInRange(targetRange) });
     const baseline = mostRecent ? def.extractor(mostRecent.metrics, baselineExtra) : null;
     const variance = computeVariance(predicted, baseline);
     const target = def.target(assumptions, insightsForTargets);
@@ -273,6 +307,43 @@ export const generateForecastService = async (
       trendDirection: variance.trendDirection,
     };
   });
+
+  // Cash Flow KPI: every other extractor above is a synchronous function of
+  // the already-computed `projected` FinancialMetrics bundle and has no
+  // access to restaurantId/branchId/targetRange (KPI_DEFINITIONS is a
+  // module-level constant, not a closure over this call's scope) — reshaping
+  // that shared, otherwise-pure pipeline to be async/scope-aware for one KPI
+  // would be invasive. generateForecastService is already async and already
+  // awaits several DB-backed helpers above, so instead the cashFlow row is
+  // patched in as a post-processing step here, using getCashOutflowProjectionService
+  // (cashflow module) for outflow combined with this call's OWN
+  // aggregatedRevenue as inflow — avoiding a second revenue-forecast call
+  // (and a forecast<->cashflow require() cycle; see cashflow.service.ts's
+  // file header for why outflow is exposed standalone rather than this
+  // module calling the cashflow module's full getCashFlowProjectionService).
+  // Left as null (its KPI_DEFINITIONS default) for restaurant-wide scope
+  // (branchId === null, since the Predictor's queries need one concrete
+  // branch) and for NEXT_6_MONTHS/NEXT_YEAR (no horizon mapping — see
+  // CASH_FLOW_HORIZON_BY_PERIOD above) or if the projection call itself
+  // fails, rather than let a Cash Flow Predictor error fail the whole
+  // forecast response.
+  const cashFlowHorizon = CASH_FLOW_HORIZON_BY_PERIOD[periodType];
+  if (branchId !== null && cashFlowHorizon) {
+    const cashFlowKpi = kpis.find((k) => k.key === "cashFlow");
+    if (cashFlowKpi) {
+      try {
+        const outflow = await getCashOutflowProjectionService(restaurantId, branchId, cashFlowHorizon);
+        const predicted = Math.round(aggregatedRevenue) - outflow.total;
+        const variance = computeVariance(predicted, cashFlowKpi.baseline);
+        cashFlowKpi.predicted = predicted;
+        cashFlowKpi.variance = variance.variance;
+        cashFlowKpi.variancePercentage = variance.variancePercentage;
+        cashFlowKpi.trendDirection = variance.trendDirection;
+      } catch (err) {
+        console.error("Cash Flow KPI projection failed, leaving predicted as null:", err);
+      }
+    }
+  }
 
   const combined = combineConfidence(RAW_SERIES_KEYS.map((k) => seriesResults[k].confidence));
 
@@ -389,12 +460,19 @@ export const getForecastVsActualService = async (
   ]);
   const range: DateRange = { startDate: snapshot.targetStartDate, endDate: snapshot.targetEndDate };
   const bundle = await resolveScopedMetrics(restaurantId, snapshot.branchId, range, menuItemCostMap, insightsData, payrollPolicyMap);
+  const actualDays = daysInRange(range);
   const actualByKey: Record<string, number | null> = {
     ...(bundle.metrics as unknown as Record<string, number | null>),
     rent: bundle.rent,
     utilities: bundle.utilities,
     operatingExpenses: bundle.metrics.labourCost + bundle.metrics.fixedExpenses + bundle.metrics.variableExpenses,
     cashFlow: null,
+    // Same divisor generateForecastService's avgDailySales KPI uses on the
+    // predicted side (extra.daysInPeriod) — real revenue over the actual
+    // completed period's own day count, not left null like cashFlow (a real
+    // actual figure IS derivable here, unlike cashFlow's documented "no data
+    // source exists" case above).
+    avgDailySales: actualDays > 0 ? Math.round((bundle.metrics.revenue / actualDays) * 100) / 100 : null,
   };
 
   const rows: ForecastVsActualRow[] = payload.kpis.map((k) => {
@@ -475,4 +553,293 @@ export const rankBranchForecastsService = async (restaurantId: number, periodTyp
   }));
   ranked.sort((a, b) => (b.revenue ?? -Infinity) - (a.revenue ?? -Infinity));
   return ranked;
+};
+
+// ─── Peak Hour Forecast — extends the Forecast Engine with order-volume/staffing prediction ───
+
+/**
+ * Projects the branch's busiest-hour order volume forward, then derives the
+ * staff headcount that volume needs. See PeakHourForecastResult's header
+ * comment in forecast.types.ts for the reuse rationale: forecastSeries for
+ * the projection (the SAME generic helper generateForecastService uses for
+ * every raw revenue/orders/cost series above — not a second forecasting
+ * mechanism), computeStaffRequirement (analytics/peakHour.formulas.ts) for
+ * staffing — neither is reimplemented here.
+ */
+export const getPeakHourForecastService = async (
+  restaurantId: number,
+  branchId: number,
+  periodType: ForecastPeriodTypeValue,
+  requestedModel: ForecastModelValue,
+): Promise<PeakHourForecastResult> => {
+  const { granularity, horizon } = HORIZON_BY_PERIOD[periodType];
+  const targetRange = resolveTargetRange(periodType);
+
+  const branch = await prisma.branch.findUnique({ where: { id: branchId }, select: { createdAt: true, restaurantId: true } });
+  if (!branch || branch.restaurantId !== restaurantId) throw new ValidationError("Branch not found");
+
+  const cap = granularity === "week" ? MAX_HISTORICAL_WEEKS : MAX_HISTORICAL_MONTHS;
+  const count = maxCompletePeriodsSince(branch.createdAt, granularity, cap);
+  const ranges = historicalRanges(granularity, count);
+
+  // One point per historical period: the busiest hour-of-day's TOTAL order
+  // count across that whole period — reuses getKitchenAnalyticsService's own
+  // hour-of-day bucketing (the exact bucketing getPeakHourAnalysisService
+  // already relies on for "today", see peakHour.service.ts's file header),
+  // just called once per historical period instead of re-deriving that
+  // bucketing math a second time.
+  const points: HistoricalPoint[] = await Promise.all(
+    ranges.map(async (range) => {
+      const kitchen = await getKitchenAnalyticsService(restaurantId, branchId, range.startDate.toISOString(), range.endDate.toISOString());
+      const peak = kitchen.hourlyData.reduce((best: any, h: any) => (h.orders > best.orders ? h : best), kitchen.hourlyData[0] ?? { orders: 0 });
+      const hasActivity = kitchen.hourlyData.some((h: any) => h.orders > 0);
+      return { value: peak?.orders ?? 0, hasActivity };
+    }),
+  );
+
+  const series = forecastSeries(points, requestedModel, granularity, horizon);
+  const perPeriod = series.perPeriod.map((v) => Math.round(v));
+  const predictedPeakHourOrders = perPeriod[perPeriod.length - 1] ?? 0;
+  const baselinePeakHourOrders = points.length > 0 ? Math.round(points[points.length - 1].value) : null;
+  const variance = computeVariance(predictedPeakHourOrders, baselinePeakHourOrders);
+
+  return {
+    restaurantId,
+    branchId,
+    periodType,
+    requestedModel,
+    modelUsed: series.modelUsed,
+    granularity,
+    targetStartDate: targetRange.startDate.toISOString(),
+    targetEndDate: targetRange.endDate.toISOString(),
+    historicalPeriodsUsed: ranges.length,
+    confidence: series.confidence.level,
+    confidenceReasons: series.confidence.reasons,
+    perPeriod,
+    predictedPeakHourOrders,
+    baselinePeakHourOrders,
+    variancePercentage: variance.variancePercentage,
+    trendDirection: variance.trendDirection,
+    projectedStaffRequirement: computeStaffRequirement(predictedPeakHourOrders),
+  };
+};
+
+// ─── Demand & Inventory Forecast (ingredient-level) ─────────────────────────
+
+const DEMAND_TRAILING_DAYS = 30;
+const DEFAULT_TOP_N_INGREDIENTS = 10;
+const LOW_STOCK_DAYS_THRESHOLD = 7;
+
+interface IngredientConsumptionSeries {
+  ingredientId: number;
+  name: string;
+  unit: string | null;
+  currentQuantity: number;
+  reorderLevel: number | null;
+  /** Oldest first, one point per calendar day over the trailing window. */
+  dailyConsumption: HistoricalPoint[];
+  totalConsumption: number;
+}
+
+/**
+ * Reconstructs each ingredient's day-by-day consumption from PAID bills ×
+ * MenuItemIngredient recipes over the trailing window — the exact same
+ * theoretical-consumption method inventory.service.ts's
+ * getDailyAuditPreviewService/getIngredientLifecycleService already use
+ * (convertQtyToIngredientUnit, imported from there, is reused rather than
+ * reimplemented), just bucketed per calendar day instead of per-audit-date/
+ * per-month so it forms a real time series forecastSeries can consume.
+ * Deliberately NOT dependent on DailyStockAudit rows (a manual, staff-
+ * entered close-of-day process) — bills always exist, so this works even
+ * for a branch that has never run a stock audit.
+ */
+const buildIngredientConsumptionSeries = async (
+  restaurantId: number,
+  branchId: number,
+  trailingDays: number,
+): Promise<IngredientConsumptionSeries[]> => {
+  const since = new Date();
+  since.setDate(since.getDate() - trailingDays);
+  since.setHours(0, 0, 0, 0);
+
+  const [ingredients, bills] = await Promise.all([
+    prisma.ingredient.findMany({
+      where: { restaurantId },
+      select: { id: true, name: true, unit: true, quantity: true, reorderLevel: true },
+    }),
+    prisma.bill.findMany({
+      where: { restaurantId, branchId, status: "PAID", createdAt: { gte: since } },
+      select: { createdAt: true, items: { select: { menuItemId: true, quantity: true } } },
+    }),
+  ]);
+
+  const menuItemIds = [...new Set(bills.flatMap((b) => b.items.filter((i) => i.menuItemId).map((i) => i.menuItemId!)))];
+  const menuItemIngredients = menuItemIds.length > 0
+    ? await prisma.menuItemIngredient.findMany({
+        where: { menuItemId: { in: menuItemIds } },
+        select: { menuItemId: true, ingredientId: true, quantity: true, unit: true },
+      })
+    : [];
+
+  const miiByMenuItem = new Map<number, { ingredientId: number; quantity: number; unit: string | null }[]>();
+  for (const mii of menuItemIngredients) {
+    if (!miiByMenuItem.has(mii.menuItemId)) miiByMenuItem.set(mii.menuItemId, []);
+    miiByMenuItem.get(mii.menuItemId)!.push(mii);
+  }
+  const ingredientUnitMap = new Map(ingredients.map((i) => [i.id, i.unit]));
+
+  const dayKeys: string[] = [];
+  for (let i = trailingDays - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    dayKeys.push(d.toISOString().slice(0, 10));
+  }
+  const perDayPerIngredient = new Map<string, Map<number, number>>(dayKeys.map((k) => [k, new Map<number, number>()]));
+
+  for (const bill of bills) {
+    const dayKey = new Date(bill.createdAt).toISOString().slice(0, 10);
+    const dayMap = perDayPerIngredient.get(dayKey);
+    if (!dayMap) continue; // outside the trailing window (edge-of-range timestamp)
+    for (const item of bill.items) {
+      if (!item.menuItemId) continue;
+      for (const mii of miiByMenuItem.get(item.menuItemId) || []) {
+        const convertedQty = convertQtyToIngredientUnit(mii.quantity, mii.unit, ingredientUnitMap.get(mii.ingredientId));
+        dayMap.set(mii.ingredientId, (dayMap.get(mii.ingredientId) || 0) + item.quantity * convertedQty);
+      }
+    }
+  }
+
+  return ingredients.map((ing) => {
+    const dailyConsumption: HistoricalPoint[] = dayKeys.map((k) => {
+      const v = perDayPerIngredient.get(k)?.get(ing.id) ?? 0;
+      return { value: v, hasActivity: v > 0 };
+    });
+    const totalConsumption = dailyConsumption.reduce((s, p) => s + p.value, 0);
+    return {
+      ingredientId: ing.id,
+      name: ing.name,
+      unit: ing.unit,
+      currentQuantity: ing.quantity ?? 0,
+      reorderLevel: ing.reorderLevel ?? null,
+      dailyConsumption,
+      totalConsumption,
+    };
+  });
+};
+
+/**
+ * The one function both getDemandForecastService and getInventoryForecastService
+ * call to turn a per-day consumption history into a projected daily rate.
+ * forecastSeries (forecast.formulas.ts) is the SAME generic time-series
+ * helper every revenue/orders/cost series in this module already goes
+ * through — passing `horizonDays` future daily points and dividing the
+ * summed predictedTotal back down by that horizon recovers "the average
+ * projected daily rate", with no second projection mechanism.
+ *
+ * `granularity` is always locked to "week" here — never "month", regardless
+ * of the caller's own periodType. forecastSeasonal's model assumes 12
+ * MONTHLY calendar points a year apart (see forecast.formulas.ts's own
+ * comment on forecastSeasonal); that has no equivalent meaning for daily
+ * ingredient-consumption data. Locking to "week" makes resolveEffectiveModel
+ * downgrade a requested SEASONAL model to Historical Trend automatically —
+ * reusing that existing downgrade rule rather than inventing a new one for
+ * daily series.
+ */
+const projectDailyConsumption = (
+  points: HistoricalPoint[],
+  model: ForecastModelValue,
+  horizonDays: number,
+): { rate: number; modelUsed: ForecastModelValue; confidence: ConfidenceLevel } => {
+  const safeHorizon = Math.max(1, horizonDays);
+  const result = forecastSeries(points, model, "week", safeHorizon);
+  const rate = Math.max(0, Math.round((result.predictedTotal / safeHorizon) * 1000) / 1000);
+  return { rate, modelUsed: result.modelUsed, confidence: result.confidence.level };
+};
+
+/**
+ * Demand Forecast — projects forward daily order-driven consumption for the
+ * restaurant's top-N (by trailing volume) ingredients. Scoped to a branch
+ * because consumption itself is inherently per-branch (bills belong to a
+ * branch); Ingredient.quantity/reorderLevel are restaurant-wide fields — the
+ * stock pool isn't split per branch in this schema (see bill.service.ts's
+ * and runningOrder.service.ts's own `ingredient.update({ quantity: {
+ * decrement } })` calls, which are branch-agnostic) — matching how
+ * inventory.service.ts's own getDailyAuditPreviewService/
+ * getIngredientLifecycleService already scope consumption to a branch while
+ * reading ingredients restaurant-wide.
+ */
+export const getDemandForecastService = async (
+  restaurantId: number,
+  branchId: number,
+  periodType: ForecastPeriodTypeValue,
+  requestedModel: ForecastModelValue,
+  topN: number = DEFAULT_TOP_N_INGREDIENTS,
+): Promise<DemandForecastResult> => {
+  const targetRange = resolveTargetRange(periodType);
+  const horizonDays = Math.max(1, daysInRange(targetRange));
+
+  const series = await buildIngredientConsumptionSeries(restaurantId, branchId, DEMAND_TRAILING_DAYS);
+  const ranked = [...series].sort((a, b) => b.totalConsumption - a.totalConsumption).slice(0, Math.max(1, topN));
+
+  const items: DemandForecastItem[] = ranked.map((ing) => {
+    const projected = projectDailyConsumption(ing.dailyConsumption, requestedModel, horizonDays);
+    const historicalDailyAverage = Math.round((ing.totalConsumption / Math.max(1, ing.dailyConsumption.length)) * 1000) / 1000;
+    return {
+      ingredientId: ing.ingredientId,
+      name: ing.name,
+      unit: ing.unit,
+      historicalDailyAverage,
+      projectedDailyConsumption: projected.rate,
+      modelUsed: projected.modelUsed,
+      confidence: projected.confidence,
+    };
+  });
+
+  return { restaurantId, branchId, periodType, requestedModel, trailingDaysAnalyzed: DEMAND_TRAILING_DAYS, items };
+};
+
+/**
+ * Inventory/Stock Forecast — for the same top-N ingredients PLUS any
+ * ingredient currently at/below its reorderLevel (even if it's not a top-N
+ * mover — a slow-moving ingredient can still be about to run out), estimates
+ * days-until-stockout = currentQuantity ÷ projectedDailyConsumption, reusing
+ * the EXACT SAME projectDailyConsumption helper getDemandForecastService
+ * calls above (at horizonDays=1, i.e. "today's projected rate" — a
+ * stock-out ETA is inherently a from-today projection, not tied to one of
+ * the module's future accounting periods, so it doesn't take a periodType).
+ * Returned as a flat list rather than a ForecastKpiRow — see
+ * InventoryForecastItem's header comment in forecast.types.ts for why that
+ * shape doesn't fit here.
+ */
+export const getInventoryForecastService = async (
+  restaurantId: number,
+  branchId: number,
+  requestedModel: ForecastModelValue = "HISTORICAL_TREND",
+  topN: number = DEFAULT_TOP_N_INGREDIENTS,
+): Promise<InventoryForecastItem[]> => {
+  const series = await buildIngredientConsumptionSeries(restaurantId, branchId, DEMAND_TRAILING_DAYS);
+  const topByVolume = [...series].sort((a, b) => b.totalConsumption - a.totalConsumption).slice(0, Math.max(1, topN));
+  const topIds = new Set(topByVolume.map((s) => s.ingredientId));
+  const nearReorder = series.filter((s) => s.reorderLevel != null && s.currentQuantity <= s.reorderLevel && !topIds.has(s.ingredientId));
+  const scoped = [...topByVolume, ...nearReorder];
+
+  return scoped
+    .map((ing) => {
+      const projected = projectDailyConsumption(ing.dailyConsumption, requestedModel, 1);
+      const daysUntilStockout = projected.rate > 0 ? Math.round((ing.currentQuantity / projected.rate) * 10) / 10 : null;
+      const reorderRecommended =
+        (daysUntilStockout !== null && daysUntilStockout <= LOW_STOCK_DAYS_THRESHOLD) ||
+        (ing.reorderLevel != null && ing.currentQuantity <= ing.reorderLevel);
+      return {
+        ingredientId: ing.ingredientId,
+        ingredientName: ing.name,
+        unit: ing.unit,
+        currentQuantity: ing.currentQuantity,
+        reorderLevel: ing.reorderLevel,
+        projectedDailyConsumption: projected.rate,
+        daysUntilStockout,
+        reorderRecommended,
+      };
+    })
+    .sort((a, b) => (a.daysUntilStockout ?? Infinity) - (b.daysUntilStockout ?? Infinity));
 };

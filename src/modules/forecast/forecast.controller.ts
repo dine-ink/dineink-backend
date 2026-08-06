@@ -1,13 +1,16 @@
 import { Request, Response } from "express";
 import {
   generateForecastService,
+  getDemandForecastService,
   getForecastAccuracyReportService,
   getForecastSnapshotService,
   getForecastVsActualService,
+  getInventoryForecastService,
+  getPeakHourForecastService,
   listForecastSnapshotsService,
   rankBranchForecastsService,
 } from "./forecast.service";
-import { ValidationError, validateBranchIdParam, validateId, validateModel, validatePeriodType } from "./forecast.validation";
+import { ValidationError, validateBranchIdParam, validateId, validateModel, validateOptionalCount, validatePeriodType } from "./forecast.validation";
 
 const handle = (fn: (req: Request, res: Response) => Promise<any>) => async (req: Request, res: Response) => {
   try {
@@ -60,4 +63,31 @@ export const getBranchRanking = handle(async (req) => {
   const periodType = validatePeriodType(req.query.period);
   const model = validateModel(req.query.model);
   return rankBranchForecastsService(restaurantId, periodType, model);
+});
+
+// ── Peak Hour / Demand / Inventory forecasting — same restaurantId path param + branchId/period/model query param convention as generateForecast above; branchId is required here (not nullable) since order-volume/staffing/consumption are inherently per-branch, unlike the restaurant-wide financial forecast. ──
+
+export const getPeakHourForecast = handle(async (req) => {
+  const restaurantId = validateId(req.params.restaurantId, "restaurantId");
+  const branchId = validateId(req.query.branchId, "branchId");
+  const periodType = validatePeriodType(req.query.period);
+  const model = validateModel(req.query.model);
+  return getPeakHourForecastService(restaurantId, branchId, periodType, model);
+});
+
+export const getDemandForecast = handle(async (req) => {
+  const restaurantId = validateId(req.params.restaurantId, "restaurantId");
+  const branchId = validateId(req.query.branchId, "branchId");
+  const periodType = validatePeriodType(req.query.period);
+  const model = validateModel(req.query.model);
+  const topN = validateOptionalCount(req.query.topN, 10);
+  return getDemandForecastService(restaurantId, branchId, periodType, model, topN);
+});
+
+export const getInventoryForecast = handle(async (req) => {
+  const restaurantId = validateId(req.params.restaurantId, "restaurantId");
+  const branchId = validateId(req.query.branchId, "branchId");
+  const model = validateModel(req.query.model);
+  const topN = validateOptionalCount(req.query.topN, 10);
+  return getInventoryForecastService(restaurantId, branchId, model, topN);
 });

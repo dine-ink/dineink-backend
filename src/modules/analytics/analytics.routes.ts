@@ -14,6 +14,8 @@ import {
   getRevenueForecast,
   getMenuEngineering,
   getTableOperations,
+  getPeakHourAnalysis,
+  getEtaPrediction,
 } from "./analytics.controller";
 import { authMiddleware } from "../../middleware/auth";
 import { requireOwnRestaurant } from "../../middleware/authorize";
@@ -38,5 +40,12 @@ router.get("/:restaurantId/staff-productivity", authMiddleware, requireOwnRestau
 router.get("/:restaurantId/revenue-forecast", authMiddleware, requireOwnRestaurant(), getRevenueForecast);
 router.get("/:restaurantId/menu-engineering", authMiddleware, requireOwnRestaurant(), getMenuEngineering);
 router.get("/:restaurantId/:branchId/table-operations", authMiddleware, requireOwnRestaurant(), getTableOperations);
+
+// Peak Hour Depletion — staff/equipment requirement, bottleneck detection,
+// and ETA prediction. Same style/access as the other :restaurantId/:branchId
+// advanced-analytics routes above (operational data, open to any
+// authenticated staff of the restaurant — no additional role gating).
+router.get("/:restaurantId/:branchId/peak-hour-analysis", authMiddleware, requireOwnRestaurant(), getPeakHourAnalysis);
+router.get("/:restaurantId/:branchId/eta-prediction", authMiddleware, requireOwnRestaurant(), getEtaPrediction);
 
 export default router;

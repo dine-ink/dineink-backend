@@ -44,3 +44,26 @@ export const sendPasswordResetOtpEmail = (to: string, otp: string) =>
     heading: "Reset your password",
     body: "Use the code below to reset your DineInk account password.",
   });
+
+// Generic free-text email — used by Vendor Intelligence's "reorder via
+// email" action to send a plain reorder request to a vendor. Unlike
+// sendCodeEmail above this carries no OTP, just a subject/body the caller
+// composes, so it's kept as its own small function rather than bending
+// sendCodeEmail's OTP-shaped template to fit.
+export const sendReorderEmail = async (to: string, subject: string, body: string) => {
+  if (!process.env.SENDGRID_API_KEY || !process.env.SENDGRID_FROM_EMAIL) {
+    throw new Error("Email service is not configured");
+  }
+
+  await sgMail.send({
+    to,
+    from: process.env.SENDGRID_FROM_EMAIL,
+    subject,
+    text: body,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
+        <p style="color:#333; font-size: 14px; white-space: pre-line;">${body}</p>
+      </div>
+    `,
+  });
+};

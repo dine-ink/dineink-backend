@@ -82,3 +82,73 @@ export interface ForecastVsActualRow {
   variancePercentage: number | null;
   accuracyPercentage: number | null;
 }
+
+/**
+ * Peak Hour Forecast — projects the branch's busiest-hour ORDER VOLUME
+ * (not the full 24-hour breakdown) forward through the same 3-model
+ * machinery (forecastSeries) every other raw series in this module already
+ * goes through, then derives the staff headcount that volume would need via
+ * computeStaffRequirement (analytics/peakHour.formulas.ts) — reused, not
+ * reimplemented. `perPeriod` holds one projected value per future
+ * sub-period of the horizon (e.g. 3 monthly values for NEXT_QUARTER);
+ * `predictedPeakHourOrders` is the LAST of those (the target period itself).
+ */
+export interface PeakHourForecastResult {
+  restaurantId: number;
+  branchId: number;
+  periodType: ForecastPeriodTypeValue;
+  requestedModel: ForecastModelValue;
+  modelUsed: ForecastModelValue;
+  granularity: ForecastGranularity;
+  targetStartDate: string;
+  targetEndDate: string;
+  historicalPeriodsUsed: number;
+  confidence: ConfidenceLevel;
+  confidenceReasons: string[];
+  perPeriod: number[];
+  predictedPeakHourOrders: number;
+  /** Most recent COMPLETE historical period's actual busiest-hour order count — the same "vs last period" reference ForecastKpiRow.baseline gives every financial KPI. */
+  baselinePeakHourOrders: number | null;
+  variancePercentage: number | null;
+  trendDirection: "up" | "down" | "flat" | null;
+  projectedStaffRequirement: number;
+}
+
+/** One ingredient's projected demand — see getDemandForecastService. */
+export interface DemandForecastItem {
+  ingredientId: number;
+  name: string;
+  unit: string | null;
+  historicalDailyAverage: number;
+  projectedDailyConsumption: number;
+  modelUsed: ForecastModelValue;
+  confidence: ConfidenceLevel;
+}
+
+export interface DemandForecastResult {
+  restaurantId: number;
+  branchId: number;
+  periodType: ForecastPeriodTypeValue;
+  requestedModel: ForecastModelValue;
+  trailingDaysAnalyzed: number;
+  items: DemandForecastItem[];
+}
+
+/**
+ * One ingredient's stock-out projection — deliberately NOT shaped as a
+ * ForecastKpiRow. The KPI shape is one scalar per period (baseline/predicted/
+ * variance); this is a per-ingredient LIST with its own currentQuantity/
+ * reorderLevel/flag, which doesn't reduce to a single number per period. A
+ * dedicated getInventoryForecastService returning this list is a better fit
+ * than forcing it into KPI_DEFINITIONS.
+ */
+export interface InventoryForecastItem {
+  ingredientId: number;
+  ingredientName: string;
+  unit: string | null;
+  currentQuantity: number;
+  reorderLevel: number | null;
+  projectedDailyConsumption: number;
+  daysUntilStockout: number | null;
+  reorderRecommended: boolean;
+}

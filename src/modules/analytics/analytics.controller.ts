@@ -20,6 +20,10 @@ import {
   getRevenueForecastService,
   getMenuEngineeringService,
 } from "./analyticsAdvanced.service";
+import {
+  getPeakHourAnalysisService,
+  getEtaPredictionService,
+} from "./peakHour.service";
 
 export const getRestaurantDashboardOverview = async (
   req: Request,
@@ -267,6 +271,31 @@ export const getMenuEngineering = async (req: Request, res: Response) => {
   try {
     const { restaurantId, branchId, from, to } = extractParams(req);
     const data = await getMenuEngineeringService(restaurantId, branchId, from, to);
+    return res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const getPeakHourAnalysis = async (req: Request, res: Response) => {
+  try {
+    const restaurantId = Number(req.params.restaurantId);
+    const branchId = Number(req.params.branchId);
+    const from = req.query.from as string | undefined;
+    const to = req.query.to as string | undefined;
+    const data = await getPeakHourAnalysisService(restaurantId, branchId, from, to);
+    return res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const getEtaPrediction = async (req: Request, res: Response) => {
+  try {
+    const restaurantId = Number(req.params.restaurantId);
+    const branchId = Number(req.params.branchId);
+    const orderType = req.query.orderType as "DINE_IN" | "TAKEAWAY" | "DELIVERY" | undefined;
+    const data = await getEtaPredictionService(restaurantId, branchId, orderType);
     return res.status(200).json({ success: true, data });
   } catch (error: any) {
     return res.status(400).json({ success: false, message: error.message });

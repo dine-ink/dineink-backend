@@ -16,32 +16,32 @@ enum BillStatus {
 }
 
 model Restaurant {
-  id                   Int                   @id @default(autoincrement())
-  name                 String
-  email                String?
-  phone                String?
-  address              String?
-  gstNumber            String?
-  insights             RestaurantInsights[]
-  ownerId              Int?
-  owner                User?                 @relation("RestaurantOwner", fields: [ownerId], references: [id])
-  users                User[]                @relation("RestaurantUsers")
-  vendors              Vendor[]
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
-  inventoryRestocks    InventoryRestock[]
-  branches             Branch[]
-  categories           Category[]
-  menuItems            MenuItem[]
-  customers            Customer[]
-  bills                Bill[]
-  runningOrders        RunningOrder[]
-  logo                 String?
-  ingredientCategories IngredientCategory[]
-  ingredients          Ingredient[]
-  attendances          Attendance[]
-  dailyCashSessions    DailyCashSession[]
-  shopExpenses         ShopExpense[]
+  id                       Int                       @id @default(autoincrement())
+  name                     String
+  email                    String?
+  phone                    String?
+  address                  String?
+  gstNumber                String?
+  insights                 RestaurantInsights[]
+  ownerId                  Int?
+  owner                    User?                     @relation("RestaurantOwner", fields: [ownerId], references: [id])
+  users                    User[]                    @relation("RestaurantUsers")
+  vendors                  Vendor[]
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  inventoryRestocks        InventoryRestock[]
+  branches                 Branch[]
+  categories               Category[]
+  menuItems                MenuItem[]
+  customers                Customer[]
+  bills                    Bill[]
+  runningOrders            RunningOrder[]
+  logo                     String?
+  ingredientCategories     IngredientCategory[]
+  ingredients              Ingredient[]
+  attendances              Attendance[]
+  dailyCashSessions        DailyCashSession[]
+  shopExpenses             ShopExpense[]
   inventoryAdjustments     InventoryAdjustment[]
   vendorPayments           VendorPayment[]
   vendorInvoices           VendorInvoice[]
@@ -58,24 +58,35 @@ model Restaurant {
   executiveKpiTargets      ExecutiveKpiTarget[]
   userDashboardPreferences UserDashboardPreference[]
   aiInsightLogs            AIInsightLog[]
+  emiSchedules             EmiSchedule[]
+  equipment                Equipment[]
+  complianceRecords        ComplianceRecord[]
+  monthlyDues              MonthlyDue[]
+  whatsAppMessageLogs      WhatsAppMessageLog[]
+  leaveRequests            LeaveRequest[]
+  salaryDeductions         SalaryDeduction[]
+  payrollRuns              PayrollRun[]
+  bankAccounts             BankAccount[]
+  upiConfigs               UpiConfig[]
+  bankTransactionEntries   BankTransactionEntry[]
 
   @@index([ownerId])
 }
 
 model Branch {
-  id                   Int                   @id @default(autoincrement())
-  name                 String
-  address              String?
-  phone                String?
-  email                String?
-  restaurantId         Int
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
-  city                 String?
-  state                String?
-  pincode              String?
-  openingTime          String? // "HH:mm" 24hr — used to compute the staff late-arrival cutoff
-  closingTime          String? // "HH:mm" 24hr — used for the after-closing daily stock audit reminder
+  id           Int      @id @default(autoincrement())
+  name         String
+  address      String?
+  phone        String?
+  email        String?
+  restaurantId Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  city         String?
+  state        String?
+  pincode      String?
+  openingTime  String? // "HH:mm" 24hr — used to compute the staff late-arrival cutoff
+  closingTime  String? // "HH:mm" 24hr — used for the after-closing daily stock audit reminder
 
   // Payroll policy: standard hours per shift type, used to derive an hourly
   // rate from a staff member's monthly salary (salary / (30 * standardHours
@@ -89,55 +100,72 @@ model Branch {
   // Floor area, for Sales per Sq. Ft. (Annual Sales / area).
   areaSqFt Float?
 
-  menuItems            MenuItem[]
-  tables               RestaurantTable[]
-  isActive             Boolean               @default(true)
-  restaurant           Restaurant            @relation(fields: [restaurantId], references: [id])
-  users                User[]
-  bills                Bill[]
-  runningOrders        RunningOrder[]
-  isDeleted            Boolean               @default(false)
-  inventoryRestocks    InventoryRestock[]
-  vendors              Vendor[]
-  billing              BillingSettings?
-  insights             RestaurantInsights[]
-  ingredientVendors    IngredientVendor[]
-  attendances          Attendance[]
-  dailyCashSessions    DailyCashSession[]
-  shopExpenses         ShopExpense[]
-  inventoryAdjustments InventoryAdjustment[]
-  vendorPayments       VendorPayment[]
-  vendorInvoices       VendorInvoice[]
-  dailyStockAudits     DailyStockAudit[]
-  sopChecklists        SopChecklist[]
-  financialAssumptions FinancialAssumptions[]
-  budgets              Budget[]
-  financialScenarios   FinancialScenario[]
-  financialForecasts   FinancialForecast[]
-  investmentProjects   InvestmentProject[]
-  executiveKpiTargets  ExecutiveKpiTarget[]
-  aiInsightLogs        AIInsightLog[]
+  menuItems              MenuItem[]
+  tables                 RestaurantTable[]
+  isActive               Boolean                @default(true)
+  restaurant             Restaurant             @relation(fields: [restaurantId], references: [id])
+  users                  User[]
+  bills                  Bill[]
+  runningOrders          RunningOrder[]
+  isDeleted              Boolean                @default(false)
+  inventoryRestocks      InventoryRestock[]
+  vendors                Vendor[]
+  billing                BillingSettings?
+  insights               RestaurantInsights[]
+  ingredientVendors      IngredientVendor[]
+  attendances            Attendance[]
+  dailyCashSessions      DailyCashSession[]
+  shopExpenses           ShopExpense[]
+  inventoryAdjustments   InventoryAdjustment[]
+  vendorPayments         VendorPayment[]
+  vendorInvoices         VendorInvoice[]
+  dailyStockAudits       DailyStockAudit[]
+  sopChecklists          SopChecklist[]
+  financialAssumptions   FinancialAssumptions[]
+  budgets                Budget[]
+  financialScenarios     FinancialScenario[]
+  financialForecasts     FinancialForecast[]
+  investmentProjects     InvestmentProject[]
+  executiveKpiTargets    ExecutiveKpiTarget[]
+  aiInsightLogs          AIInsightLog[]
+  emiSchedules           EmiSchedule[]
+  equipment              Equipment[]
+  complianceRecords      ComplianceRecord[]
+  monthlyDues            MonthlyDue[]
+  whatsAppMessageLogs    WhatsAppMessageLog[]
+  leaveRequests          LeaveRequest[]
+  salaryDeductions       SalaryDeduction[]
+  payrollRuns            PayrollRun[]
+  bankAccounts           BankAccount[]
+  upiConfigs             UpiConfig[]
+  bankTransactionEntries BankTransactionEntry[]
+
+  // Kitchen capacity policy for Peak Hour Depletion — hourly order-count
+  // ceiling used for bottleneck detection, and whether exceeding it should
+  // flag new orders for a manual hold suggestion (never a silent auto-reject).
+  kitchenCapacityPerHour Int?
+  autoThrottleEnabled    Boolean @default(false)
 
   @@index([restaurantId])
 }
 
 model User {
-  id                          Int                   @id @default(autoincrement())
+  id                          Int                      @id @default(autoincrement())
   name                        String
-  email                       String?               @unique
+  email                       String?                  @unique
   password                    String
-  hasLogin                    Boolean               @default(false)
+  hasLogin                    Boolean                  @default(false)
   role                        String
-  phone                       String?               @unique
+  phone                       String?                  @unique
   restaurantId                Int?
   branchId                    Int?
-  createdAt                   DateTime              @default(now())
-  updatedAt                   DateTime              @updatedAt
-  isActive                    Boolean               @default(true)
-  isDeleted                   Boolean               @default(false)
-  restaurant                  Restaurant?           @relation("RestaurantUsers", fields: [restaurantId], references: [id])
-  ownedRestaurants            Restaurant[]          @relation("RestaurantOwner")
-  branch                      Branch?               @relation(fields: [branchId], references: [id])
+  createdAt                   DateTime                 @default(now())
+  updatedAt                   DateTime                 @updatedAt
+  isActive                    Boolean                  @default(true)
+  isDeleted                   Boolean                  @default(false)
+  restaurant                  Restaurant?              @relation("RestaurantUsers", fields: [restaurantId], references: [id])
+  ownedRestaurants            Restaurant[]             @relation("RestaurantOwner")
+  branch                      Branch?                  @relation(fields: [branchId], references: [id])
   salary                      Float?
   joiningDate                 DateTime?
   shift                       String?
@@ -145,17 +173,20 @@ model User {
   monthlyWorkingHours         Float?
   department                  String?
   attendances                 Attendance[]
-  paidExpenses                ShopExpense[]         @relation("ExpensePaidByUser")
-  inventoryAdjustmentsUpdated InventoryAdjustment[] @relation("InventoryUpdatedBy")
-  financialAssumptionsUpdated FinancialAssumptions[] @relation("FinancialAssumptionsUpdatedBy")
-  budgetsCreated              Budget[]                @relation("BudgetCreatedBy")
-  budgetsUpdated              Budget[]                @relation("BudgetUpdatedBy")
-  financialScenariosCreated   FinancialScenario[]     @relation("FinancialScenarioCreatedBy")
-  financialScenariosUpdated   FinancialScenario[]     @relation("FinancialScenarioUpdatedBy")
-  financialForecastsCreated   FinancialForecast[]     @relation("FinancialForecastCreatedBy")
-  investmentProjectsCreated   InvestmentProject[]     @relation("InvestmentProjectCreatedBy")
-  executiveKpiTargetsUpdated  ExecutiveKpiTarget[]    @relation("ExecutiveKpiTargetUpdatedBy")
+  paidExpenses                ShopExpense[]            @relation("ExpensePaidByUser")
+  inventoryAdjustmentsUpdated InventoryAdjustment[]    @relation("InventoryUpdatedBy")
+  financialAssumptionsUpdated FinancialAssumptions[]   @relation("FinancialAssumptionsUpdatedBy")
+  budgetsCreated              Budget[]                 @relation("BudgetCreatedBy")
+  budgetsUpdated              Budget[]                 @relation("BudgetUpdatedBy")
+  financialScenariosCreated   FinancialScenario[]      @relation("FinancialScenarioCreatedBy")
+  financialScenariosUpdated   FinancialScenario[]      @relation("FinancialScenarioUpdatedBy")
+  financialForecastsCreated   FinancialForecast[]      @relation("FinancialForecastCreatedBy")
+  investmentProjectsCreated   InvestmentProject[]      @relation("InvestmentProjectCreatedBy")
+  executiveKpiTargetsUpdated  ExecutiveKpiTarget[]     @relation("ExecutiveKpiTargetUpdatedBy")
   dashboardPreference         UserDashboardPreference?
+  leaveRequests               LeaveRequest[]
+  salaryDeductions            SalaryDeduction[]
+  payrollRunLines             PayrollRunLine[]
 }
 
 model EmailOtp {
@@ -191,20 +222,20 @@ model Category {
 }
 
 model BillingSettings {
-  id             Int      @id @default(autoincrement())
-  branchId       Int      @unique
-  billingTypes   String[]
-  gstPercentage  Float
-  serviceCharge  Float
-  includeGST     Boolean
-  enableDiscount Boolean
-  enableTips     Boolean
-  paymentMethods String[]
+  id                        Int      @id @default(autoincrement())
+  branchId                  Int      @unique
+  billingTypes              String[]
+  gstPercentage             Float
+  serviceCharge             Float
+  includeGST                Boolean
+  enableDiscount            Boolean
+  enableTips                Boolean
+  paymentMethods            String[]
   // Manual (non-coupon) discounts above this % of the subtotal require a
   // manager's password to unlock at checkout. Null = use the service-layer
   // default (20%) rather than forcing every branch to set one explicitly.
   discountApprovalThreshold Float?
-  branch         Branch   @relation(fields: [branchId], references: [id])
+  branch                    Branch   @relation(fields: [branchId], references: [id])
 }
 
 // A restaurant-wide coupon/promo code — % or flat-amount off, optionally
@@ -214,7 +245,7 @@ model DiscountCode {
   id           Int       @id @default(autoincrement())
   restaurantId Int
   code         String
-  type         String    // "PERCENTAGE" | "FIXED"
+  type         String // "PERCENTAGE" | "FIXED"
   value        Float
   isActive     Boolean   @default(true)
   maxUses      Int?
@@ -355,8 +386,8 @@ model Bill {
   // code. discountApprovedById is set when the discount exceeded the
   // branch's approval threshold and a manager unlocked it (mirrors the
   // manager-only gate refunds/voids already have).
-  discountType       String? @default("PERCENTAGE")
-  discountCode       String?
+  discountType         String? @default("PERCENTAGE")
+  discountCode         String?
   discountApprovedById Int?
 
   // Cumulative amount refunded so far (see BillRefund) — `total` is reduced
@@ -552,17 +583,17 @@ model RunningOrderBatch {
 }
 
 model RunningOrderBatchItem {
-  id                  Int               @id @default(autoincrement())
+  id                  Int                          @id @default(autoincrement())
   runningOrderBatchId Int
   menuItemId          Int?
   itemName            String
   quantity            Int
   price               Float
   total               Float
-  status              String            @default("PENDING")
+  status              String                       @default("PENDING")
   notes               String? // special instructions, e.g. "no onions"
-  createdAt           DateTime          @default(now())
-  runningOrderBatch   RunningOrderBatch          @relation(fields: [runningOrderBatchId], references: [id], onDelete: Cascade)
+  createdAt           DateTime                     @default(now())
+  runningOrderBatch   RunningOrderBatch            @relation(fields: [runningOrderBatchId], references: [id], onDelete: Cascade)
   addOns              RunningOrderBatchItemAddOn[]
 }
 
@@ -589,7 +620,7 @@ model IngredientCategory {
 }
 
 model Ingredient {
-  id                   Int                   @id @default(autoincrement())
+  id                   Int                      @id @default(autoincrement())
   name                 String
   restaurantId         Int
   categoryId           Int?
@@ -598,11 +629,11 @@ model Ingredient {
   purchasePrice        Float?
   pricePerUnit         Float?
   reorderLevel         Float?
-  isAiGenerated        Boolean               @default(true)
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
-  restaurant           Restaurant            @relation(fields: [restaurantId], references: [id])
-  category             IngredientCategory?   @relation(fields: [categoryId], references: [id])
+  isAiGenerated        Boolean                  @default(true)
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  restaurant           Restaurant               @relation(fields: [restaurantId], references: [id])
+  category             IngredientCategory?      @relation(fields: [categoryId], references: [id])
   menuItemIngredients  MenuItemIngredient[]
   ingredientVendors    IngredientVendor[]
   inventoryAdjustments InventoryAdjustment[]
@@ -728,7 +759,6 @@ model RestaurantInsights {
  * RestaurantInsights, which holds the actual monthly ₹ expense figures
  * (rent paid, utility bills, etc.) that feed the same engine — this model
  * holds the *rates and targets*, not actuals.
- *
  * Two-tier resolution, done in financeAssumptions.service.ts, NOT in the
  * database: one row per restaurant with branchId = null is the restaurant
  * default; branches may have an additional row (branchId set) whose non-null
@@ -740,9 +770,11 @@ model RestaurantInsights {
  * service layer enforces it via find-then-upsert.
  */
 model FinancialAssumptions {
-  id           Int @id @default(autoincrement())
+  id           Int  @id @default(autoincrement())
   restaurantId Int
-  /** null = restaurant-level default. Set = this branch's override row. */
+  /**
+   * null = restaurant-level default. Set = this branch's override row.
+   */
   branchId     Int?
 
   /**
@@ -788,7 +820,9 @@ model FinancialAssumptions {
    */
   gstPercentage Float?
   workingDays   Int?
-  /** Hours the restaurant operates per day, e.g. 12.5. */
+  /**
+   * Hours the restaurant operates per day, e.g. 12.5.
+   */
   businessHours Float?
 
   updatedById Int?
@@ -890,12 +924,10 @@ enum ScenarioType {
  * utilities, marketing, maintenance, packaging) are new — either genuine
  * what-if deltas with no steady-state equivalent, or absolute ₹ overrides of
  * the actual expense figures the Finance Engine would otherwise use.
- *
  * A scenario is purely a saved set of INPUT overrides. It never stores a
  * calculated/projected value — those are always computed fresh by the
  * What-If Engine at read time and discarded, per the "never persist
  * projected financial values" requirement.
- *
  * No ScenarioVersion model: cloning a scenario is just creating another
  * FinancialScenario row with copied override values, the same pattern
  * Budget's "duplicate" uses — nothing here calls for browsing/diffing a
@@ -985,7 +1017,6 @@ enum ForecastModelType {
  * already an established pattern in this schema (see InventoryRestock.data),
  * used here because the field set is a per-KPI array, not a bounded flat set
  * of independent columns (unlike Scenario/FinancialAssumptions).
- *
  * Snapshots are created idempotently — at most one row per
  * (restaurantId, branchId, periodType, targetStartDate) — the first time
  * that exact future period is forecast for that scope (see
@@ -1052,18 +1083,18 @@ enum InvestmentStatus {
  * rather than re-implementing scenario types a second time.
  */
 model InvestmentProject {
-  id           Int               @id @default(autoincrement())
+  id           Int              @id @default(autoincrement())
   restaurantId Int
   branchId     Int?
   name         String
-  type         InvestmentType    @default(CUSTOM)
+  type         InvestmentType   @default(CUSTOM)
   description  String?
-  status       InvestmentStatus  @default(PLANNED)
+  status       InvestmentStatus @default(PLANNED)
 
   initialInvestment      Float
   plannedStartDate       DateTime
   expectedCompletionDate DateTime?
-  projectLifeYears       Int     @default(5)
+  projectLifeYears       Int       @default(5)
 
   /**
    * ASSUMPTIONS — defaults sourced from the Financial Assumptions Engine at
@@ -1074,14 +1105,14 @@ model InvestmentProject {
    * editable afterward and never re-synced.
    */
   discountRate                Float?
-  inflationRate                Float?
-  monthlyRevenueIncrease       Float?
-  revenueGrowthPercentage      Float?
-  expectedCostSavings          Float?
-  labourSavings                Float?
-  additionalOperatingExpenses  Float?
-  maintenanceCost              Float?
-  salvageValue                 Float?
+  inflationRate               Float?
+  monthlyRevenueIncrease      Float?
+  revenueGrowthPercentage     Float?
+  expectedCostSavings         Float?
+  labourSavings               Float?
+  additionalOperatingExpenses Float?
+  maintenanceCost             Float?
+  salvageValue                Float?
 
   createdById Int?
   createdAt   DateTime @default(now())
@@ -1137,13 +1168,13 @@ model ExecutiveKpiTarget {
  * widget array, not a bounded flat field set).
  */
 model UserDashboardPreference {
-  id           Int    @id @default(autoincrement())
-  userId       Int    @unique
+  id           Int @id @default(autoincrement())
+  userId       Int @unique
   restaurantId Int
 
-  layout        Json?
-  pinnedKpis    Json?
-  defaultPeriod String?
+  layout          Json?
+  pinnedKpis      Json?
+  defaultPeriod   String?
   defaultBranchId Int?
 
   updatedAt DateTime @updatedAt
@@ -1169,7 +1200,7 @@ model UserDashboardPreference {
  * forecast-target-period cadence.
  */
 model AIInsightLog {
-  id           Int     @id @default(autoincrement())
+  id           Int  @id @default(autoincrement())
   restaurantId Int
   branchId     Int?
 
@@ -1179,9 +1210,9 @@ model AIInsightLog {
   summary    String
   confidence String // "high" | "medium" | "low"
 
-  supportingMetrics   Json
-  recommendedActions  Json
-  relatedScreens      Json
+  supportingMetrics  Json
+  recommendedActions Json
+  relatedScreens     Json
 
   logDate     DateTime // calendar day this insight was generated for, floored to midnight — the idempotency key alongside restaurantId/branchId/category/title
   generatedAt DateTime @default(now())
@@ -1243,14 +1274,18 @@ model Vendor {
   address           String?
   phone             String?
   email             String?
+  // Free-text categorization (e.g. "Produce", "Dairy", "Packaging") for
+  // Vendor Intelligence filtering — deliberately not an enum since vendor
+  // types vary too much by restaurant to standardize server-side.
+  vendorType        String?
   restaurantId      Int
   branchId          Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  restaurant Restaurant     @relation(fields: [restaurantId], references: [id])
-  branch     Branch?        @relation(fields: [branchId], references: [id])
+  restaurant Restaurant      @relation(fields: [restaurantId], references: [id])
+  branch     Branch?         @relation(fields: [branchId], references: [id])
   payments   VendorPayment[]
   invoices   VendorInvoice[]
 
@@ -1293,6 +1328,10 @@ model VendorInvoice {
   status        String    @default("UNPAID")
   items         Json?
   notes         String?
+  // Scanned/uploaded e-bill for this invoice — Vendor Intelligence's e-bill
+  // tracking. Stored the same way as everything else in /uploads (see
+  // middleware/upload.ts), not a duplicate storage mechanism.
+  documentUrl   String?
   createdById   Int?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -1306,14 +1345,316 @@ model VendorInvoice {
   @@index([branchId])
 }
 
+// ── Foundation: EMI schedules, Equipment, Compliance, Dues ───────────────────
+// Shared across Cash Flow Predictor, Dues Tracker, and Equipment Data List —
+// built once here rather than per-feature (see plan's cross-cutting notes).
+
+model EmiSchedule {
+  id              Int      @id @default(autoincrement())
+  restaurantId    Int
+  branchId        Int?
+  name            String
+  principalAmount Float
+  emiAmount       Float
+  dueDayOfMonth   Int
+  startDate       DateTime
+  tenureMonths    Int
+  notes           String?
+  isActive        Boolean  @default(true)
+  createdById     Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  restaurant Restaurant  @relation(fields: [restaurantId], references: [id])
+  branch     Branch?     @relation(fields: [branchId], references: [id])
+  equipment  Equipment[]
+
+  @@index([restaurantId])
+  @@index([branchId])
+}
+
+model Equipment {
+  id                     Int       @id @default(autoincrement())
+  restaurantId           Int
+  branchId               Int
+  name                   String
+  category               String?
+  capacity               String?
+  volume                 String?
+  itemCapacityCount      Int?
+  powerConsumptionKw     Float?
+  purchasePrice          Float?
+  purchaseDate           DateTime?
+  emiScheduleId          Int?
+  installationDate       DateTime?
+  warrantyExpiryDate     DateTime?
+  expectedLifespanMonths Int?
+  serviceProviderName    String?
+  serviceProviderContact String?
+  nextMaintenanceDate    DateTime?
+  maintenanceNotes       String?
+  isActive               Boolean   @default(true)
+  createdById            Int?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  restaurant  Restaurant   @relation(fields: [restaurantId], references: [id])
+  branch      Branch       @relation(fields: [branchId], references: [id])
+  emiSchedule EmiSchedule? @relation(fields: [emiScheduleId], references: [id])
+
+  @@index([restaurantId])
+  @@index([branchId])
+  @@index([emiScheduleId])
+}
+
+model ComplianceRecord {
+  id              Int       @id @default(autoincrement())
+  restaurantId    Int
+  branchId        Int
+  // FSSAI | FIRE_SAFETY | PEST_CONTROL | GST_FILING
+  type            String
+  licenseNumber   String?
+  issueDate       DateTime?
+  expiryDate      DateTime?
+  // For GST_FILING this is the computed next filing due date (GSTR-3B,
+  // 20th of the following month) rather than a manually-entered value —
+  // Cash Flow Predictor and Dues Tracker read this field, they don't
+  // recompute the due-date rule themselves.
+  nextDueDate     DateTime?
+  status          String    @default("VALID") // VALID | EXPIRING_SOON | EXPIRED | DUE
+  documentUrl     String?
+  lastRenewedDate DateTime?
+  notes           String?
+  createdById     Int?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch     @relation(fields: [branchId], references: [id])
+
+  @@index([restaurantId])
+  @@index([branchId])
+  @@index([type])
+}
+
+model MonthlyDue {
+  id           Int       @id @default(autoincrement())
+  restaurantId Int
+  branchId     Int
+  // EB | SALARIES | RENT | OPERATIONS | UTILITIES | MAINTENANCE | MISC | EMI
+  category     String
+  month        Int
+  year         Int
+  amountDue    Float
+  amountPaid   Float     @default(0)
+  dueDate      DateTime?
+  paidDate     DateTime?
+  status       String    @default("PENDING") // PENDING | PARTIAL | PAID | OVERDUE
+  notes        String?
+  createdById  Int?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch     @relation(fields: [branchId], references: [id])
+
+  @@index([restaurantId])
+  @@index([branchId])
+  @@index([month, year])
+}
+
+// ── WhatsApp Integration ──────────────────────────────────────────────────────
+// One message log + sender interface shared by Vendor Intelligence (reorder),
+// Compliance Checker (GST reminders), and general customer messaging.
+
+model WhatsAppMessageLog {
+  id                Int      @id @default(autoincrement())
+  restaurantId      Int
+  branchId          Int?
+  direction         String   @default("OUTBOUND")
+  recipientPhone    String
+  // CUSTOMER_MARKETING | VENDOR_EBILL | VENDOR_PAYMENT | GST_UPDATE
+  templateType      String
+  message           String
+  payload           Json?
+  // QUEUED | SENT | FAILED — always SENT today since only a mock sender
+  // exists (see config/whatsapp.ts); kept as a real status column so a live
+  // provider can be swapped in later without a schema change.
+  status            String   @default("SENT")
+  relatedEntityType String?
+  relatedEntityId   Int?
+  createdById       Int?
+  createdAt         DateTime @default(now())
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id])
+
+  @@index([restaurantId])
+  @@index([branchId])
+}
+
+// ── Payroll extensions (Cash Flow Predictor sub-features) ────────────────────
+
+model LeaveRequest {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  restaurantId Int
+  branchId     Int
+  leaveType    String   @default("CASUAL") // CASUAL | SICK | EARNED | UNPAID
+  startDate    DateTime
+  endDate      DateTime
+  reason       String?
+  status       String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  approvedById Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user       User       @relation(fields: [userId], references: [id])
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch     @relation(fields: [branchId], references: [id])
+
+  @@index([userId])
+  @@index([restaurantId])
+  @@index([branchId])
+}
+
+model SalaryDeduction {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  restaurantId  Int
+  branchId      Int
+  deductionType String   @default("OTHER") // ADVANCE | FINE | UNPAID_LEAVE | OTHER
+  amount        Float
+  month         Int
+  year          Int
+  notes         String?
+  createdById   Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user       User       @relation(fields: [userId], references: [id])
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch     @relation(fields: [branchId], references: [id])
+
+  @@index([userId])
+  @@index([restaurantId])
+  @@index([branchId])
+  @@index([month, year])
+}
+
+model PayrollRun {
+  id            Int      @id @default(autoincrement())
+  restaurantId  Int
+  branchId      Int
+  month         Int
+  year          Int
+  status        String   @default("PROCESSED") // DRAFT | PROCESSED
+  totalPayout   Float    @default(0)
+  generatedById Int?
+  createdAt     DateTime @default(now())
+
+  restaurant Restaurant       @relation(fields: [restaurantId], references: [id])
+  branch     Branch           @relation(fields: [branchId], references: [id])
+  lines      PayrollRunLine[]
+
+  @@unique([branchId, month, year])
+  @@index([restaurantId])
+  @@index([branchId])
+}
+
+model PayrollRunLine {
+  id           Int   @id @default(autoincrement())
+  payrollRunId Int
+  userId       Int
+  baseSalary   Float
+  overtimePay  Float @default(0)
+  deductions   Float @default(0)
+  netPay       Float
+
+  payrollRun PayrollRun @relation(fields: [payrollRunId], references: [id])
+  user       User       @relation(fields: [userId], references: [id])
+
+  @@index([payrollRunId])
+  @@index([userId])
+}
+
+// ── Account & Bank Integration ────────────────────────────────────────────────
+// No payment gateway is integrated (no Razorpay/Cashfree/etc. account exists)
+// — these models track the restaurant's own bank/UPI details and manually
+// entered/reconciled transactions, not a live gateway sync.
+
+model BankAccount {
+  id                  Int      @id @default(autoincrement())
+  restaurantId        Int
+  branchId            Int?
+  accountHolderName   String
+  bankName            String
+  accountNumberMasked String
+  ifsc                String
+  isPrimary           Boolean  @default(false)
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id])
+
+  @@index([restaurantId])
+  @@index([branchId])
+}
+
+model UpiConfig {
+  id           Int      @id @default(autoincrement())
+  restaurantId Int
+  branchId     Int
+  upiId        String
+  displayName  String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch     @relation(fields: [branchId], references: [id])
+
+  @@unique([branchId])
+  @@index([restaurantId])
+}
+
+model BankTransactionEntry {
+  id                     Int      @id @default(autoincrement())
+  restaurantId           Int
+  branchId               Int
+  bankAccountId          Int?
+  entryDate              DateTime
+  description            String?
+  amount                 Float
+  type                   String // CREDIT | DEBIT
+  // Best-effort match against a Bill or VendorPayment by amount + date
+  // proximity — set by the reconciliation endpoint, editable by the owner.
+  // This is manual/assisted reconciliation, not a live gateway webhook.
+  reconciliationStatus   String   @default("UNMATCHED") // UNMATCHED | MATCHED | IGNORED
+  matchedBillId          Int?
+  matchedVendorPaymentId Int?
+  notes                  String?
+  createdById            Int?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch     @relation(fields: [branchId], references: [id])
+
+  @@index([restaurantId])
+  @@index([branchId])
+}
+
 model IngredientPriceHistory {
-  id           Int        @id @default(autoincrement())
+  id           Int      @id @default(autoincrement())
   ingredientId Int
   restaurantId Int
   oldPrice     Float?
   newPrice     Float
   changedById  Int?
-  createdAt    DateTime   @default(now())
+  createdAt    DateTime @default(now())
 
   ingredient Ingredient @relation(fields: [ingredientId], references: [id])
   restaurant Restaurant @relation(fields: [restaurantId], references: [id])
@@ -1504,11 +1845,11 @@ model DailyStockAudit {
   branchId     Int
   ingredientId Int
   auditDate    DateTime // date of the audit (store as midnight UTC for the day)
-  openingQty   Float    // stock at start of day (auto-filled from prev closing or current ingredient qty)
-  sopConsumed  Float    // calculated from orders: Σ(billItem.qty × recipe.qty) for that day
-  closingQty   Float    // actual stock entered by staff at end of day
-  wastage      Float    // (openingQty - sopConsumed) - closingQty
-  notes        String?  // optional staff notes
+  openingQty   Float // stock at start of day (auto-filled from prev closing or current ingredient qty)
+  sopConsumed  Float // calculated from orders: Σ(billItem.qty × recipe.qty) for that day
+  closingQty   Float // actual stock entered by staff at end of day
+  wastage      Float // (openingQty - sopConsumed) - closingQty
+  notes        String? // optional staff notes
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

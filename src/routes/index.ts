@@ -26,6 +26,13 @@ import forecastRoutes from "../modules/forecast/forecast.routes";
 import investmentRoutes from "../modules/investment/investment.routes";
 import executiveRoutes from "../modules/executive/executive.routes";
 import aiRoutes from "../modules/ai/ai.routes";
+import duesRoutes from "../modules/dues/dues.routes";
+import emiRoutes from "../modules/emi/emi.routes";
+import equipmentRoutes from "../modules/equipment/equipment.routes";
+import complianceRoutes from "../modules/compliance/compliance.routes";
+import whatsappRoutes from "../modules/whatsapp/whatsapp.routes";
+import cashflowRoutes from "../modules/cashflow/cashflow.routes";
+import bankingRoutes from "../modules/banking/banking.routes";
 
 const router = express.Router();
 
@@ -56,5 +63,12 @@ router.use("/forecasts", forecastRoutes);
 router.use("/investments", investmentRoutes);
 router.use("/executive", executiveRoutes);
 router.use("/ai", aiRoutes);
+router.use("/dues", duesRoutes);
+router.use("/emi", emiRoutes);
+router.use("/equipment", equipmentRoutes);
+router.use("/compliance", complianceRoutes);
+router.use("/whatsapp", whatsappRoutes);
+router.use("/cashflow", cashflowRoutes);
+router.use("/banking", bankingRoutes);
 
 export default router;

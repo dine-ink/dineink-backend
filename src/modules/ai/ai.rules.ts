@@ -343,6 +343,87 @@ export const expandHighPerformingBranchRecommendation = (
   };
 };
 
+/**
+ * Predicted Stock-Out Risk — consumes getInventoryForecastService's flagged
+ * (reorderRecommended) items directly (forecast module, Phase 9). Same
+ * "already-computed numbers only" rule as every other function here: the
+ * days-until-stockout figures come straight from that service's
+ * currentQuantity ÷ projectedDailyConsumption math, never re-derived.
+ */
+export const predictedStockOutRisk = (
+  flaggedItems: { ingredientName: string; unit: string | null; daysUntilStockout: number | null }[],
+  relatedScreens: string[],
+): Insight | null => {
+  if (flaggedItems.length === 0) return null;
+  const worst = [...flaggedItems].sort((a, b) => (a.daysUntilStockout ?? Infinity) - (b.daysUntilStockout ?? Infinity));
+  const soonest = worst[0];
+  const names = worst.slice(0, 3).map((i) => (i.daysUntilStockout != null ? `${i.ingredientName} (${i.daysUntilStockout.toFixed(1)} days)` : i.ingredientName));
+  const minDays = soonest.daysUntilStockout;
+  return {
+    category: "risk",
+    title: flaggedItems.length === 1 ? "Predicted Stock-Out Risk" : `Predicted Stock-Out Risk (${flaggedItems.length} ingredients)`,
+    summary: `Based on projected consumption, ${flaggedItems.length} ingredient(s) are on track to run out soon — ${names.join(", ")}${flaggedItems.length > 3 ? `, and ${flaggedItems.length - 3} more` : ""}.`,
+    severity: minDays !== null && minDays <= 2 ? "critical" : minDays !== null && minDays <= 4 ? "high" : "medium",
+    confidence: "medium",
+    supportingMetrics: worst.slice(0, 5).map((i) => ({ key: `stockout-${i.ingredientName}`, label: i.ingredientName, value: i.daysUntilStockout, unit: "count" as const })),
+    recommendedActions: ["Place a reorder for the flagged ingredients before the projected stock-out date.", "Review the Inventory Forecast for the full projected-consumption list."],
+    relatedScreens,
+  };
+};
+
+/**
+ * Predicted Staff Shortfall at Peak Hour — compares
+ * getPeakHourForecastService's projectedStaffRequirement (itself
+ * computeStaffRequirement applied to a forecasted, not historical, order
+ * volume — see forecast.service.ts's getPeakHourForecastService) against the
+ * branch's currently-scheduled/active staff count. Both numbers are handed
+ * in already-computed; this function only compares and templates them.
+ */
+export const predictedStaffShortfallRisk = (
+  projectedStaffRequirement: number,
+  currentActiveStaffCount: number,
+  relatedScreens: string[],
+): Insight | null => {
+  const shortfall = projectedStaffRequirement - currentActiveStaffCount;
+  if (shortfall <= 0) return null;
+  return {
+    category: "risk",
+    title: "Predicted Staff Shortfall at Peak Hour",
+    summary: `The forecasted peak hour is projected to need ${projectedStaffRequirement} staff, but only ${currentActiveStaffCount} are currently scheduled/active — a shortfall of ${shortfall}.`,
+    severity: shortfall >= 3 ? "critical" : shortfall === 2 ? "high" : "medium",
+    confidence: "medium",
+    supportingMetrics: [
+      { key: "projectedStaffRequirement", label: "Projected Staff Needed", value: projectedStaffRequirement, unit: "count" },
+      { key: "currentActiveStaffCount", label: "Currently Scheduled/Active Staff", value: currentActiveStaffCount, unit: "count" },
+      { key: "staffShortfall", label: "Shortfall", value: shortfall, unit: "count" },
+    ],
+    recommendedActions: ["Schedule additional staff ahead of the forecasted peak hour.", "Review the Peak Hour Forecast for the projected order volume driving this."],
+    relatedScreens,
+  };
+};
+
+/** Growing Peak-Hour Demand — an opportunity when the forecasted peak-hour order volume is trending meaningfully above the most recent historical peak, so staffing/inventory can be prepared ahead of it rather than caught out. */
+export const growingPeakHourDemandOpportunity = (
+  peakHour: { predictedPeakHourOrders: number; baselinePeakHourOrders: number | null; variancePercentage: number | null },
+  relatedScreens: string[],
+): Insight | null => {
+  if (peakHour.variancePercentage == null || peakHour.variancePercentage < 15 || peakHour.baselinePeakHourOrders == null) return null;
+  return {
+    category: "opportunity",
+    title: "Peak-Hour Demand Growing",
+    summary: `The busiest hour's order volume is forecasted to grow ${peakHour.variancePercentage.toFixed(1)}% (${peakHour.baselinePeakHourOrders} orders recently vs ${peakHour.predictedPeakHourOrders} projected) — worth preparing staffing and stock ahead of it.`,
+    severity: "info",
+    confidence: "medium",
+    supportingMetrics: [
+      { key: "predictedPeakHourOrders", label: "Projected Peak-Hour Orders", value: peakHour.predictedPeakHourOrders, unit: "count" },
+      { key: "baselinePeakHourOrders", label: "Recent Peak-Hour Orders", value: peakHour.baselinePeakHourOrders, unit: "count" },
+      { key: "peakHourVariancePercentage", label: "Variance %", value: peakHour.variancePercentage, unit: "percentage" },
+    ],
+    recommendedActions: ["Review the Peak Hour Forecast's projected staff requirement.", "Ensure top-selling ingredients are stocked ahead of the busier peak hour."],
+    relatedScreens,
+  };
+};
+
 export const delayLowReturnInvestmentRecommendations = (
   needsAttention: { project: { name: string }; metrics: { npv: number | null } }[],
   relatedScreens: string[],

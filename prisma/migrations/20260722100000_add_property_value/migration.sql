@@ -1,0 +1,4 @@
+-- No-op placeholder: this migration folder was missing its migration.sql,
+-- which blocked Prisma's migration-history integrity check (P3015) for all
+-- new migrations. Left intentionally empty — the original migration's SQL
+-- (if any was ever applied) is not being reconstructed or reapplied here.

@@ -1,5 +1,7 @@
 import prisma from "../../config/prisma";
 import { ForbiddenError } from "./vendor.validation";
+import { sendWhatsAppMessageService } from "../whatsapp/whatsapp.service";
+import { sendReorderEmail } from "../../config/mailer";
 
 // Whether this branch has ever logged a vendor invoice at all, regardless of
 // payment status — distinguishes "no purchasing data entered" from "invoices
@@ -81,6 +83,7 @@ export const createVendorInvoiceService = async (callerRestaurantId: number, dat
   items?: any;
   notes?: string;
   createdById?: number;
+  documentUrl?: string;
 }) => {
   const vendor = await prisma.vendor.findUnique({ where: { id: data.vendorId }, select: { restaurantId: true } });
   if (!vendor || vendor.restaurantId !== callerRestaurantId) throw new ForbiddenError("You do not have access to this vendor");
@@ -98,6 +101,7 @@ export const createVendorInvoiceService = async (callerRestaurantId: number, dat
       items:         data.items,
       notes:         data.notes,
       createdById:   data.createdById,
+      documentUrl:   data.documentUrl,
     },
   });
 };
@@ -284,4 +288,128 @@ export const getVendorPerformanceService = async (
               : "STABLE",
     };
   });
+};
+
+// ── Vendor Pricing History ───────────────────────────────────────────────────
+//
+// Same IngredientVendor join used by getVendorPerformanceService above —
+// price history isn't itself vendor-tagged, so "pricing history for this
+// vendor" means the price history of whatever ingredients this vendor is
+// linked to supply, read from the existing IngredientPriceHistory rows
+// rather than a new price-tracking mechanism.
+
+export const getVendorPricingHistoryService = async (restaurantId: number, vendorId: number) => {
+  const vendor = await prisma.vendor.findUnique({ where: { id: vendorId }, select: { restaurantId: true } });
+  if (!vendor || vendor.restaurantId !== restaurantId) {
+    throw new ForbiddenError("You do not have access to this vendor");
+  }
+
+  const ingredientLinks = await prisma.ingredientVendor.findMany({
+    where: { vendorId },
+    select: {
+      ingredient: {
+        select: {
+          id: true,
+          name: true,
+          pricePerUnit: true,
+          priceHistory: {
+            orderBy: { createdAt: "asc" },
+            select: { oldPrice: true, newPrice: true, createdAt: true },
+          },
+        },
+      },
+    },
+  });
+
+  return ingredientLinks.map((l) => {
+    const ing = l.ingredient;
+    const priceHistory = ing.priceHistory.map((h) => ({
+      oldPrice:  h.oldPrice,
+      newPrice:  h.newPrice,
+      changedAt: h.createdAt,
+    }));
+
+    const currentPrice = ing.pricePerUnit ?? null;
+    // previousPrice comes from the oldPrice of the most recent change — but
+    // only once there's more than one recorded change; with a single entry
+    // there's no earlier *recorded* trend to compare against yet.
+    const mostRecent = priceHistory.length > 1 ? priceHistory[priceHistory.length - 1] : null;
+    const previousPrice = mostRecent ? mostRecent.oldPrice ?? null : null;
+    const changePercent =
+      previousPrice != null && currentPrice != null && previousPrice !== 0
+        ? Math.round(((currentPrice - previousPrice) / previousPrice) * 1000) / 10
+        : null;
+
+    return {
+      ingredientId:   ing.id,
+      ingredientName: ing.name,
+      currentPrice,
+      previousPrice,
+      changePercent,
+      priceHistory,
+    };
+  });
+};
+
+// ── Vendor Reorder (WhatsApp / Email) ────────────────────────────────────────
+//
+// Composes a plain human-readable reorder message from the named ingredients
+// and sends it via whichever channel the caller picked. WhatsApp delivery
+// goes through the shared sendWhatsAppMessageService (the one place any
+// module should send a WhatsApp message) so the attempt is logged the same
+// way every other WhatsApp-sending feature's attempts are. Email delivery
+// uses the small sendReorderEmail helper added to config/mailer.ts for this
+// feature.
+
+export const reorderVendorService = async (
+  callerRestaurantId: number,
+  data: {
+    vendorId: number;
+    branchId?: number;
+    channel: "whatsapp" | "email";
+    ingredientIds: number[];
+    createdById?: number;
+  },
+) => {
+  const vendor = await prisma.vendor.findUnique({ where: { id: data.vendorId } });
+  if (!vendor || vendor.restaurantId !== callerRestaurantId) {
+    throw new ForbiddenError("You do not have access to this vendor");
+  }
+
+  const ingredients = await prisma.ingredient.findMany({
+    where: { id: { in: data.ingredientIds ?? [] }, restaurantId: callerRestaurantId },
+    select: { id: true, name: true, reorderLevel: true, quantity: true, unit: true },
+  });
+
+  const ingredientList = ingredients
+    .map((i) => {
+      const qty = i.reorderLevel ?? i.quantity;
+      return qty != null ? `${i.name} (${qty}${i.unit ? " " + i.unit : ""})` : i.name;
+    })
+    .join(", ");
+
+  const message = `Reorder request for ${vendor.name}: ${ingredientList || "(no items specified)"}`;
+
+  if (data.channel === "whatsapp") {
+    // A plain Error (not ForbiddenError) — the vendor is accessible, it's
+    // just missing the contact detail this channel needs. The controller
+    // maps this to 400, not 403/500.
+    if (!vendor.phone) throw new Error("Vendor has no phone number on file");
+    await sendWhatsAppMessageService(callerRestaurantId, {
+      branchId:          data.branchId ?? null,
+      recipientPhone:    vendor.phone,
+      templateType:      "VENDOR_EBILL",
+      message,
+      relatedEntityType: "Vendor",
+      relatedEntityId:   data.vendorId,
+      createdById:       data.createdById,
+    });
+  } else if (data.channel === "email") {
+    if (!vendor.email) throw new Error("Vendor has no email on file");
+    await sendReorderEmail(vendor.email, `Reorder request - ${vendor.name}`, message);
+  } else {
+    throw new Error("Invalid reorder channel");
+  }
+
+  return { success: true, channel: data.channel };
 };

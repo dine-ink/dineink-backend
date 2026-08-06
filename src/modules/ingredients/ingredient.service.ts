@@ -368,13 +368,14 @@ export const createVendor = async (data: {
   address?: string;
   phone?: string;
   email?: string;
+  vendorType?: string;
 }) => {
   return prisma.vendor.create({ data });
 };
 
 export const updateVendor = async (
   id: number,
-  data: { name?: string; address?: string; phone?: string; email?: string },
+  data: { name?: string; address?: string; phone?: string; email?: string; vendorType?: string },
   callerRestaurantId: number,
 ) => {
   const existing = await prisma.vendor.findUnique({ where: { id } });

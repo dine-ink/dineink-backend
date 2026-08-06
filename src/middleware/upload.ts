@@ -22,6 +22,17 @@ const EXTENSION_BY_MIME: Record<string, string> = {
   "image/gif": ".gif",
 };
 
+// Compliance documents (FSSAI licenses, fire safety certificates, GST filing
+// proofs, etc.) are frequently scanned/exported as PDFs, not just images —
+// this set extends the image-only allowlist above with application/pdf, and
+// is used ONLY by the separate `uploadDocument` instance below so the
+// image-only `upload` export other modules rely on stays unchanged.
+const DOCUMENT_ALLOWED_MIME_TYPES = new Set([...ALLOWED_MIME_TYPES, "application/pdf"]);
+const DOCUMENT_EXTENSION_BY_MIME: Record<string, string> = {
+  ...EXTENSION_BY_MIME,
+  "application/pdf": ".pdf",
+};
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadPath);
@@ -43,6 +54,34 @@ export const upload = multer({
   fileFilter: (req, file, cb) => {
     if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
       cb(new Error("Only PNG, JPEG, WEBP, or GIF images are allowed"));
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+// Same disk storage / safe-filename pattern as `upload` above, but for
+// compliance documents (licenses, certificates, filing receipts) which may
+// be PDFs as well as scanned images. Kept as a fully separate multer
+// instance (own storage config, own fileFilter) so the image-only `upload`
+// export above is untouched for the modules already depending on it.
+const documentStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadPath);
+  },
+  filename: (req, file, cb) => {
+    const ext = DOCUMENT_EXTENSION_BY_MIME[file.mimetype] || ".bin";
+    const uniqueName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+    cb(null, uniqueName);
+  },
+});
+
+export const uploadDocument = multer({
+  storage: documentStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB — scanned certificates/PDFs run larger than a logo image
+  fileFilter: (req, file, cb) => {
+    if (!DOCUMENT_ALLOWED_MIME_TYPES.has(file.mimetype)) {
+      cb(new Error("Only PNG, JPEG, WEBP, GIF images or PDF documents are allowed"));
       return;
     }
     cb(null, true);

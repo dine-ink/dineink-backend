@@ -26,3 +26,11 @@ export const validateBranchIdParam = (value: unknown): number | null => {
   if (value === undefined || value === null || value === "" || value === "null") return null;
   return validateId(value, "branchId");
 };
+
+/** Optional positive integer query param with a default — used for `topN` on the demand/inventory forecast routes. */
+export const validateOptionalCount = (value: unknown, fallback: number): number => {
+  if (value === undefined || value === null || value === "") return fallback;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) throw new ValidationError("'topN' must be a positive number");
+  return Math.round(n);
+};

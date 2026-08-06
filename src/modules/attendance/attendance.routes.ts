@@ -4,8 +4,21 @@ import {
   getMonthlyAttendance,
   upsertManualAttendance,
 } from "./attendance.controller";
+import {
+  getLeaveRequests,
+  createLeaveRequest,
+  updateLeaveRequestStatus,
+  deleteLeaveRequest,
+} from "./leave.controller";
+import {
+  getSalaryDeductions,
+  createSalaryDeduction,
+  updateSalaryDeduction,
+  deleteSalaryDeduction,
+} from "./salaryDeduction.controller";
+import { runPayroll, getPayrollRuns } from "./payroll.controller";
 import { authMiddleware } from "../../middleware/auth";
-import { requireOwnBranch } from "../../middleware/authorize";
+import { requireOwnBranch, requireOwnRestaurant, requireRole } from "../../middleware/authorize";
 
 const router = Router();
 
@@ -20,5 +33,69 @@ router.get("/branch/:branchId/monthly", authMiddleware, requireOwnBranch(), getM
 // for one employee's one day. Body: { userId, restaurantId, branchId, date,
 // manualTotalHours?, overtimeHours?, status? }
 router.post("/manual", authMiddleware, upsertManualAttendance);
+
+// --- Leave management -------------------------------------------------
+// GET /api/attendance/leave/:restaurantId/:branchId?status=PENDING
+router.get(
+  "/leave/:restaurantId/:branchId",
+  authMiddleware,
+  requireOwnRestaurant(),
+  requireOwnBranch(),
+  getLeaveRequests,
+);
+
+// POST /api/attendance/leave — staff submit their own leave request.
+// Body: { userId, branchId, leaveType?, startDate, endDate, reason? }
+router.post("/leave", authMiddleware, createLeaveRequest);
+
+// PATCH /api/attendance/leave/:id/status — approve/reject, OWNER/MANAGER only.
+// Body: { status: "APPROVED" | "REJECTED" }
+router.patch(
+  "/leave/:id/status",
+  authMiddleware,
+  requireRole("OWNER", "MANAGER"),
+  updateLeaveRequestStatus,
+);
+
+// DELETE /api/attendance/leave/:id — OWNER/MANAGER only.
+router.delete("/leave/:id", authMiddleware, requireRole("OWNER", "MANAGER"), deleteLeaveRequest);
+
+// --- Salary deductions --------------------------------------------------
+// Financially sensitive — gated to OWNER/MANAGER on top of auth + ownership,
+// same convention as emi.routes.ts.
+// GET /api/attendance/deductions/:restaurantId/:branchId?month=&year=
+router.get(
+  "/deductions/:restaurantId/:branchId",
+  authMiddleware,
+  requireRole("OWNER", "MANAGER"),
+  requireOwnRestaurant(),
+  requireOwnBranch(),
+  getSalaryDeductions,
+);
+
+// POST /api/attendance/deductions
+// Body: { userId, branchId, deductionType?, amount, month, year, notes? }
+router.post("/deductions", authMiddleware, requireRole("OWNER", "MANAGER"), createSalaryDeduction);
+
+// PUT /api/attendance/deductions/:id
+router.put("/deductions/:id", authMiddleware, requireRole("OWNER", "MANAGER"), updateSalaryDeduction);
+
+// DELETE /api/attendance/deductions/:id
+router.delete("/deductions/:id", authMiddleware, requireRole("OWNER", "MANAGER"), deleteSalaryDeduction);
+
+// --- Payroll runs --------------------------------------------------------
+// Financially sensitive — gated to OWNER/MANAGER, same as salary deductions.
+// POST /api/attendance/payroll/run — Body: { branchId, month, year }
+router.post("/payroll/run", authMiddleware, requireRole("OWNER", "MANAGER"), runPayroll);
+
+// GET /api/attendance/payroll/:restaurantId/:branchId
+router.get(
+  "/payroll/:restaurantId/:branchId",
+  authMiddleware,
+  requireRole("OWNER", "MANAGER"),
+  requireOwnRestaurant(),
+  requireOwnBranch(),
+  getPayrollRuns,
+);
 
 export default router;
