@@ -8,8 +8,16 @@ import prisma from "../../config/prisma";
 import { DateRange, PeriodKey, daysInRange, getComparisonPeriod, resolveDateRange } from "../../utils/dateRange";
 import { computeVariance } from "../finance/finance.formulas";
 import { computeAchievement } from "../finance/finance.ratios";
-import { fetchInsightsForScope, getMenuItemCostMap, resolveScopedMetrics, ScopedFinancialBundle } from "../finance/finance.service";
-import { BUDGET_CATEGORIES, BudgetItemInput, BudgetVarianceReport, BudgetVarianceRow } from "./budget.types";
+import {
+  fetchInsightsForScope,
+  getMenuItemCostMap,
+  getShopExpenseLedgerActuals,
+  resolveScopedMetrics,
+  RestaurantInsightsRow,
+  ScopedFinancialBundle,
+  ShopExpenseLedgerActuals,
+} from "../finance/finance.service";
+import { BUDGET_CATEGORIES, BudgetItemInput, BudgetVarianceReport, BudgetVarianceRow, FixedCostDefaults } from "./budget.types";
 import { ValidationError } from "./budget.validation";
 
 // ── CRUD ──────────────────────────────────────────────────────────────────
@@ -72,6 +80,12 @@ const findOwnedBudget = async (restaurantId: number, budgetId: number) => {
 };
 
 export const getBudgetService = async (restaurantId: number, budgetId: number) => findOwnedBudget(restaurantId, budgetId);
+
+export const deleteBudgetService = async (restaurantId: number, budgetId: number) => {
+  await findOwnedBudget(restaurantId, budgetId);
+  // BudgetItem.budget has onDelete: Cascade — deleting the Budget row alone cleans up its items.
+  await prisma.budget.delete({ where: { id: budgetId } });
+};
 
 export const updateBudgetService = async (
   restaurantId: number,
@@ -136,6 +150,42 @@ export const duplicateBudgetService = async (
   });
 };
 
+/**
+ * Live monthly figures for the "pre-fill but editable" fixed-cost defaults
+ * shown when creating a new Budget — reuses the exact same
+ * RestaurantInsights fields getExpenseBreakdown's `components` already
+ * proration-derives, but unprorated (a monthly-defaults grid wants one
+ * representative monthly figure, not a date-ranged actual). `labour` is a
+ * live headcount×salary estimate (no overtime — a forward-looking planning
+ * default, not a historical actual).
+ */
+export const getFixedCostDefaultsService = async (restaurantId: number, branchId: number | null): Promise<FixedCostDefaults> => {
+  const insightsData = await fetchInsightsForScope(restaurantId, branchId);
+  const insightsRows =
+    branchId !== null
+      ? [insightsData as RestaurantInsightsRow]
+      : [...(insightsData as { byBranchId: Map<number, RestaurantInsightsRow> }).byBranchId.values()];
+  const sumField = (key: "monthlyRent" | "loanEmi" | "internet" | "phoneBills" | "accounting" | "insurance" | "licenses") =>
+    insightsRows.reduce((total, row) => total + (row?.[key] || 0), 0);
+
+  const staff = await prisma.user.findMany({
+    where: { restaurantId, ...(branchId !== null ? { branchId } : {}), isDeleted: false },
+    select: { salary: true },
+  });
+  const labour = staff.reduce((sum, u) => sum + (u.salary || 0), 0);
+
+  return {
+    rent: sumField("monthlyRent"),
+    labour,
+    loanEmi: sumField("loanEmi"),
+    internet: sumField("internet"),
+    phoneBills: sumField("phoneBills"),
+    accounting: sumField("accounting"),
+    insurance: sumField("insurance"),
+    licenses: sumField("licenses"),
+  };
+};
+
 // ── Variance Engine ─────────────────────────────────────────────────────────
 
 const floorToMidnight = (d: Date): Date => {
@@ -192,7 +242,7 @@ export const aggregateBudgetForCategory = (
   return unit === "percentage" ? (totalDays > 0 ? Math.round((weightedTotal / totalDays) * 10) / 10 : null) : Math.round(weightedTotal);
 };
 
-const actualFor = (category: string, bundle: ScopedFinancialBundle): number | null => {
+const actualFor = (category: string, bundle: ScopedFinancialBundle, ledgerActuals: ShopExpenseLedgerActuals): number | null => {
   switch (category) {
     case "revenue": return bundle.metrics.revenue;
     case "orders": return bundle.metrics.orders;
@@ -203,12 +253,22 @@ const actualFor = (category: string, bundle: ScopedFinancialBundle): number | nu
     case "labour": return bundle.metrics.labourCost;
     case "labourPercentage": return bundle.metrics.labourCostPercentage;
     case "rent": return bundle.rent;
+    case "loanEmi": return bundle.components.loanEmi;
+    case "internet": return bundle.components.internet;
+    case "phoneBills": return bundle.components.phoneBills;
+    case "accounting": return bundle.components.accounting;
+    case "insurance": return bundle.components.insurance;
+    case "licenses": return bundle.components.licenses;
+    // Utilities stays sourced from RestaurantInsights (electricity + gas), not the
+    // ShopExpense ledger — ShopExpense tags Electricity/Internet/Gas/Phone bills with
+    // the same "UTILITIES" expenseType, and Internet/Phone are now their own fixed
+    // categories above; summing the ledger here would double-count them.
     case "utilities": return bundle.utilities;
-    case "marketing": return bundle.marketing;
-    case "maintenance": return bundle.maintenance;
+    case "marketing": return ledgerActuals.marketing;
+    case "maintenance": return ledgerActuals.maintenance;
     case "cleaning": return null;
-    case "packaging": return bundle.packaging;
-    case "deliveryCommission": return bundle.deliveryCommission;
+    case "packaging": return ledgerActuals.packaging;
+    case "deliveryCommission": return ledgerActuals.deliveryCommission;
     case "operatingExpenses": return bundle.metrics.labourCost + bundle.metrics.fixedExpenses + bundle.metrics.variableExpenses;
     case "ebitda": return bundle.metrics.ebitda;
     case "netProfit": return bundle.metrics.netProfit;
@@ -242,15 +302,17 @@ export const getBudgetVarianceService = async (
   const menuItemCostMap = await getMenuItemCostMap(restaurantId);
   const insightsData = await fetchInsightsForScope(restaurantId, budget.branchId);
 
-  const [currentActuals, previousActuals] = await Promise.all([
+  const [currentActuals, previousActuals, currentLedgerActuals, previousLedgerActuals] = await Promise.all([
     resolveScopedMetrics(restaurantId, budget.branchId, range, menuItemCostMap, insightsData),
     resolveScopedMetrics(restaurantId, budget.branchId, previousRange, menuItemCostMap, insightsData),
+    getShopExpenseLedgerActuals(restaurantId, budget.branchId, range),
+    getShopExpenseLedgerActuals(restaurantId, budget.branchId, previousRange),
   ]);
 
   const rows: BudgetVarianceRow[] = BUDGET_CATEGORIES.map((def) => {
     const budgetValue = aggregateBudgetForCategory(budget.items, def.key, range, def.unit);
-    const actual = def.actualAvailable ? actualFor(def.key, currentActuals) : null;
-    const previousActual = def.actualAvailable ? actualFor(def.key, previousActuals) : null;
+    const actual = def.actualAvailable ? actualFor(def.key, currentActuals, currentLedgerActuals) : null;
+    const previousActual = def.actualAvailable ? actualFor(def.key, previousActuals, previousLedgerActuals) : null;
     const variance = computeVariance(actual, budgetValue);
     const trend = computeVariance(actual, previousActual);
     const achievementPercentage = computeAchievement(actual, budgetValue, def.higherIsBetter);
@@ -259,6 +321,7 @@ export const getBudgetVarianceService = async (
       category: def.key,
       label: def.label,
       unit: def.unit,
+      isFixed: def.isFixed,
       budget: budgetValue,
       actual,
       variance: variance.variance,

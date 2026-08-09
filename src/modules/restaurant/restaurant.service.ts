@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import prisma from "../../config/prisma";
 import { generateToken } from "../../utils/generateToken/generateToken";
+import { normalizeEmail } from "../../utils/email";
 import { ForbiddenError } from "./restaurant.validation";
 
 export const setupRestaurantService = async (userId: number, body: any) => {
@@ -20,6 +21,7 @@ export const setupRestaurantService = async (userId: number, body: any) => {
   const staffWithPasswords = await Promise.all(
     (staff || []).map(async (member: any) => ({
       ...member,
+      email: normalizeEmail(member.email),
       hashedPassword: await bcrypt.hash(member.password || "1234", 10),
     })),
   );
@@ -466,7 +468,7 @@ export const createStaffService = async (callerRestaurantId: number, data: any) 
       restaurantId: callerRestaurantId,
       branchId:     data.branchId     ? Number(data.branchId)     : null,
       name: data.name,
-      email: data.email || null,
+      email: normalizeEmail(data.email) || null,
       phone: data.phone || null,
       password: hashedPassword,
       role: data.role || "STAFF",
@@ -488,7 +490,7 @@ export const updateStaffService = async (callerRestaurantId: number, userId: num
   }
   const updateData: any = {
     name: data.name,
-    email: data.email || null,
+    email: normalizeEmail(data.email) || null,
     phone: data.phone || null,
     role: data.role || "STAFF",
     hasLogin: data.hasLogin ?? false,

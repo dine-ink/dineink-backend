@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import prisma from "../../config/prisma";
 import { generateToken } from "../../utils/generateToken/generateToken";
 import { sendOtpEmail, sendPasswordResetOtpEmail } from "../../config/mailer";
+import { normalizeEmail } from "../../utils/email";
 
 const OTP_TTL_MINUTES = 10;
 const MAX_OTP_ATTEMPTS = 5;
@@ -34,14 +35,19 @@ export const verifyManagerOverride = async (restaurantId: number, password: stri
 };
 
 export const loginUser = async (identifier: string, password: string) => {
+  // identifier may be an email or a phone number — normalizing is a no-op
+  // for digits, and makes email matching case-insensitive (a user who
+  // signed up as "John@Example.com" must be able to log in as
+  // "john@example.com").
+  const normalizedIdentifier = normalizeEmail(identifier);
   const user = await prisma.user.findFirst({
     where: {
       OR: [
         {
-          email: identifier,
+          email: normalizedIdentifier,
         },
         {
-          phone: identifier,
+          phone: normalizedIdentifier,
         },
       ],
     },
@@ -127,6 +133,7 @@ const createOwnerAccount = async ({
   phone?: string;
   password: string;
 }) => {
+  email = normalizeEmail(email);
   const existingUser = await prisma.user.findFirst({
     where: {
       OR: [
@@ -184,6 +191,7 @@ const createOwnerAccount = async ({
 export const signupUser = createOwnerAccount;
 
 export const sendSignupOtp = async (email: string) => {
+  email = normalizeEmail(email);
   if (!email || !EMAIL_REGEX.test(email)) {
     throw new Error("Enter a valid email address");
   }
@@ -221,6 +229,7 @@ export const verifySignupOtpAndCreateUser = async ({
   password: string;
   otp: string;
 }) => {
+  email = normalizeEmail(email);
   const record = await prisma.emailOtp.findUnique({ where: { email } });
 
   if (!record) {
@@ -286,6 +295,7 @@ export const changePasswordService = async (
 };
 
 export const sendPasswordResetOtp = async (email: string) => {
+  email = normalizeEmail(email);
   if (!email || !EMAIL_REGEX.test(email)) {
     throw new Error("Enter a valid email address");
   }
@@ -319,6 +329,7 @@ export const verifyPasswordResetOtpAndSetPassword = async ({
   otp: string;
   newPassword: string;
 }) => {
+  email = normalizeEmail(email);
   const record = await prisma.passwordResetOtp.findUnique({ where: { email } });
 
   if (!record) {

@@ -1,9 +1,11 @@
 import { Router } from "express";
 import {
   createBudget,
+  deleteBudget,
   duplicateBudget,
   getBudget,
   getBudgetVariance,
+  getFixedCostDefaults,
   listBudgets,
   updateBudget,
   upsertBudgetItems,
@@ -19,8 +21,11 @@ const router = Router();
 // on :restaurantId is the tenant-isolation boundary for every route here.
 router.post("/:restaurantId", authMiddleware, requireOwnRestaurant(), createBudget);
 router.get("/:restaurantId", authMiddleware, requireOwnRestaurant(), listBudgets);
+// Registered before the generic /:budgetId route below — otherwise "fixed-defaults" would be swallowed as a budgetId value.
+router.get("/:restaurantId/fixed-defaults", authMiddleware, requireOwnRestaurant(), getFixedCostDefaults);
 router.get("/:restaurantId/:budgetId", authMiddleware, requireOwnRestaurant(), getBudget);
 router.put("/:restaurantId/:budgetId", authMiddleware, requireOwnRestaurant(), updateBudget);
+router.delete("/:restaurantId/:budgetId", authMiddleware, requireOwnRestaurant(), deleteBudget);
 router.put("/:restaurantId/:budgetId/items", authMiddleware, requireOwnRestaurant(), upsertBudgetItems);
 router.post("/:restaurantId/:budgetId/duplicate", authMiddleware, requireOwnRestaurant(), duplicateBudget);
 router.get("/:restaurantId/:budgetId/variance", authMiddleware, requireOwnRestaurant(), getBudgetVariance);

@@ -1,9 +1,11 @@
 import { Request, Response } from "express";
 import {
   createBudgetService,
+  deleteBudgetService,
   duplicateBudgetService,
   getBudgetService,
   getBudgetVarianceService,
+  getFixedCostDefaultsService,
   listBudgetsService,
   updateBudgetService,
   upsertBudgetItemsService,
@@ -44,6 +46,12 @@ export const createBudget = handle(async (req) => {
   return createBudgetService(restaurantId, payload, (req as any).user?.id);
 });
 
+export const getFixedCostDefaults = handle(async (req) => {
+  const restaurantId = validateId(req.params.restaurantId, "restaurantId");
+  const branchId = req.query.branchId !== undefined ? Number(req.query.branchId) : null;
+  return getFixedCostDefaultsService(restaurantId, branchId);
+});
+
 export const listBudgets = handle(async (req) => {
   const restaurantId = validateId(req.params.restaurantId, "restaurantId");
   const branchId = req.query.branchId !== undefined ? Number(req.query.branchId) : undefined;
@@ -56,6 +64,12 @@ export const getBudget = handle(async (req) => {
   const restaurantId = validateId(req.params.restaurantId, "restaurantId");
   const budgetId = validateId(req.params.budgetId, "budgetId");
   return getBudgetService(restaurantId, budgetId);
+});
+
+export const deleteBudget = handle(async (req) => {
+  const restaurantId = validateId(req.params.restaurantId, "restaurantId");
+  const budgetId = validateId(req.params.budgetId, "budgetId");
+  await deleteBudgetService(restaurantId, budgetId);
 });
 
 export const updateBudget = handle(async (req) => {

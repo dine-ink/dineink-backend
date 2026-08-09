@@ -1,5 +1,5 @@
 import type { DailyStockAudit, Ingredient, InventoryAdjustment, InventoryRestock, Prisma } from "../../../generated/prisma";
-import type { SeedConfig } from "../config";
+import { estimateTotalBills, type SeedConfig } from "../config";
 import type { SeedContext } from "../context";
 import {
   batchCreateManyAndReturn,
@@ -37,14 +37,50 @@ const ADJUSTMENT_REASONS: Record<string, string[]> = {
   MANUAL: ["Manual stock correction", "Physical count adjustment", "Recorded quantity error fixed"],
 };
 
-function buildRestockRow(ingredient: Ingredient, categoryName: string) {
+// Per-ingredient monthly consumption estimated from its recipes × a rough
+// expected orders-per-menu-item figure (see estimateMonthlyConsumptionMap
+// below) — anchors restock volume to realistic recipe-driven demand.
+// Previously this was derived purely from `ingredient.reorderLevel`, a
+// number with no relationship to how much the menu actually uses per
+// month — for an ingredient like Butter (56ml-40ml per dish, ~46 orders/
+// month) that meant restocking ~59L/month against ~1.84L of real recipe
+// demand, i.e. the Stock Lifecycle report's wastage% formula (consumed −
+// expected-via-recipe) saw a ~57L "unexplained" gap every month and
+// reported 84% wastage on a perfectly normal ingredient. Ingredients with
+// NO recipe link (packaging/cleaning supplies — estimatedMonthlyConsumption
+// = 0) keep the old reorderLevel-based approximation, since there's no
+// demand signal to anchor to for them and they're excluded from the
+// wastage calculation entirely anyway (see inventory.service.ts's
+// hasRecipeMapping).
+function buildRestockRow(
+  ingredient: Ingredient,
+  categoryName: string,
+  estimatedMonthlyConsumption: number,
+  demandMultiplier: number,
+) {
   const unit = ingredient.unit || "Kg";
   const basePrice = ingredient.pricePerUnit || 1;
-  const typicalWeeklyQty = Math.max(0.1, (ingredient.reorderLevel || 1) * randomFloat(0.8, 1.5));
-  const openingQty = Math.round((ingredient.reorderLevel || 1) * randomFloat(1.0, 2.0) * 100) / 100;
-  const closingQty = Math.round(openingQty * randomFloat(0.8, 1.3) * 100) / 100;
+
+  // demandMultiplier folds in two corrections relative to a flat monthly
+  // average:
+  //  - the most recent month in the history window is almost never a full
+  //    calendar month (historyMonths() runs up to "today"), so a partial
+  //    month must restock less or a partial month's real sales get
+  //    compared against a full month's assumed consumption;
+  //  - bill.generator.ts compounds real bill volume by
+  //    (1 + monthlyRevenueGrowthPct) per month elapsed since the start of
+  //    the history window, so later months genuinely sell more per day
+  //    than earlier ones — restock demand must compound the same way or
+  //    later months look under-restocked relative to real demand.
+  const scaledConsumption = estimatedMonthlyConsumption * demandMultiplier;
+  const demandDriven = scaledConsumption > 0;
+  const typicalWeeklyQty = demandDriven
+    ? Math.max(0.05, (scaledConsumption / 4) * randomFloat(0.9, 1.3))
+    : Math.max(0.1, (ingredient.reorderLevel || 1) * demandMultiplier * randomFloat(0.8, 1.5));
+  const openingQty = Math.round(typicalWeeklyQty * randomFloat(1.0, 2.0) * 100) / 100;
 
   const data: Record<string, unknown[]> = {};
+  let totalPurchasedQty = 0;
 
   for (const [weekIndex, weekKey] of WEEK_KEYS.entries()) {
     const row: Record<string, unknown> = {
@@ -66,17 +102,67 @@ function buildRestockRow(ingredient: Ingredient, categoryName: string) {
       row[`Day ${day} Qty`] = dayQty;
       row[`Day ${day} Price`] = dayPrice;
       weekPurchase += dayQty * dayPrice;
+      totalPurchasedQty += dayQty;
     }
     row["Week Purchase"] = Math.round(weekPurchase * 100) / 100;
-
-    if (weekIndex === WEEK_KEYS.length - 1) {
-      row["Closing Qty"] = closingQty;
-    }
 
     data[weekKey] = [row];
   }
 
+  // Closing = whatever's left after realistic recipe-driven consumption
+  // (plus a small genuine wastage margin, 2-20%) for demand-driven
+  // ingredients; the old opening-based approximation otherwise.
+  const available = openingQty + totalPurchasedQty;
+  const closingQty = demandDriven
+    ? Math.round(Math.max(0, available - scaledConsumption * randomFloat(1.02, 1.2)) * 100) / 100
+    : Math.round(openingQty * randomFloat(0.8, 1.3) * 100) / 100;
+  (data[WEEK_KEYS[WEEK_KEYS.length - 1]][0] as Record<string, unknown>)["Closing Qty"] = closingQty;
+
   return data;
+}
+
+// Rough, uniform-across-menu estimate of how many times one menu item is
+// ordered per branch per month — reuses estimateTotalBills()'s own
+// bills/day/branch × months/branches math (the same figures the Billing
+// phase itself targets) rather than a second, disconnected assumption.
+function estimateOrdersPerMenuItemPerMonth(config: SeedConfig): number {
+  const avgItemsPerBill = (config.billing.itemsPerBillRange[0] + config.billing.itemsPerBillRange[1]) / 2;
+  const totalItemOrders = estimateTotalBills(config) * avgItemsPerBill;
+  return totalItemOrders / config.branches.length / config.history.monthsOfHistory / config.counts.menuItems;
+}
+
+// 1.0 for any fully-elapsed historical month; for the month containing
+// `anchor` (today), the fraction of that month that's actually happened —
+// matches historyDateRange()/historyMonths()'s own "runs up to anchor, not
+// to month-end" semantics, so restock volume for that final month is sized
+// the same way the real Bill history for it is.
+function monthCompletionFraction(month: number, year: number, anchor: Date): number {
+  const isAnchorMonth = anchor.getFullYear() === year && anchor.getMonth() + 1 === month;
+  if (!isAnchorMonth) return 1;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  return Math.min(1, anchor.getDate() / daysInMonth);
+}
+
+// Mirrors bill.generator.ts's own `growth = (1 + monthlyRevenueGrowthPct) **
+// monthsElapsed` — real bill volume compounds month over month from the
+// start of the history window, so restock demand must compound the same
+// way or later months look systematically under-restocked relative to the
+// (higher) real demand they actually see.
+function monthlyGrowthFactor(month: number, year: number, firstDay: Date, monthlyRevenueGrowthPct: number): number {
+  const monthsElapsed = (year - firstDay.getFullYear()) * 12 + (month - 1 - firstDay.getMonth());
+  return (1 + monthlyRevenueGrowthPct) ** monthsElapsed;
+}
+
+// ingredientId -> estimated monthly consumption (0 for ingredients with no
+// recipe link at all — packaging/cleaning supplies etc.).
+function estimateMonthlyConsumptionMap(config: SeedConfig, ctx: SeedContext): Map<number, number> {
+  const ordersPerMenuItemPerMonth = estimateOrdersPerMenuItemPerMonth(config);
+  const map = new Map<number, number>();
+  for (const mii of ctx.menuItemIngredients) {
+    const prev = map.get(mii.ingredientId) || 0;
+    map.set(mii.ingredientId, prev + mii.quantity * ordersPerMenuItemPerMonth);
+  }
+  return map;
 }
 
 function mergeWeeklyData(rows: Array<Record<string, unknown[]>>): Record<string, unknown[]> {
@@ -89,12 +175,29 @@ function mergeWeeklyData(rows: Array<Record<string, unknown[]>>): Record<string,
 
 async function ensureRestocks(db: Db, config: SeedConfig, ctx: SeedContext): Promise<InventoryRestock[]> {
   const categoryNameById = new Map(ctx.ingredientCategories.map((c) => [c.id, c.name]));
+  // Computed once (recipe-driven, not per branch/month) — see
+  // estimateMonthlyConsumptionMap's docstring for why this replaces the old
+  // reorderLevel-only approximation.
+  const monthlyConsumptionByIngredientId = estimateMonthlyConsumptionMap(config, ctx);
   const rows: Prisma.InventoryRestockCreateManyInput[] = [];
+  // Captured once so historyMonths() and monthCompletionFraction() agree on
+  // exactly the same "today" — negligible in practice but avoids any
+  // theoretical day-boundary mismatch between the two calls.
+  const anchor = new Date();
+  const firstDay = historyDateRange(config.history.monthsOfHistory, anchor)[0];
 
   for (const branchCtx of ctx.branches) {
-    for (const { month, year } of historyMonths(config.history.monthsOfHistory)) {
+    for (const { month, year } of historyMonths(config.history.monthsOfHistory, anchor)) {
+      const fraction = monthCompletionFraction(month, year, anchor);
+      const growth = monthlyGrowthFactor(month, year, firstDay, config.analytics.monthlyRevenueGrowthPct);
+      const demandMultiplier = fraction * growth;
       const perIngredient = ctx.ingredients.map((ingredient) =>
-        buildRestockRow(ingredient, (ingredient.categoryId && categoryNameById.get(ingredient.categoryId)) || "Uncategorized"),
+        buildRestockRow(
+          ingredient,
+          (ingredient.categoryId && categoryNameById.get(ingredient.categoryId)) || "Uncategorized",
+          monthlyConsumptionByIngredientId.get(ingredient.id) || 0,
+          demandMultiplier,
+        ),
       );
       rows.push({
         restaurantId: ctx.restaurant.id,

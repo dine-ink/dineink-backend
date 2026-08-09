@@ -3,18 +3,25 @@ import { CONFIG, estimateTotalBills } from "./config";
 import type { BranchContext, SeedContext } from "./context";
 import { validateAnalytics } from "./generators/analytics.generator";
 import { generateAttendance } from "./generators/attendance.generator";
+import { generateBankingData } from "./generators/banking.generator";
 import { generateBillingHistory } from "./generators/bill.generator";
 import { generateBranch } from "./generators/branch.generator";
 import { generateCategories } from "./generators/category.generator";
+import { generateComplianceRecords } from "./generators/compliance.generator";
 import { generateCustomers } from "./generators/customer.generator";
+import { generateMonthlyDues } from "./generators/dues.generator";
+import { generateEmiSchedules } from "./generators/emi.generator";
+import { generateEquipment } from "./generators/equipment.generator";
 import { generateBranchOperations } from "./generators/expense.generator";
 import { generateIngredients } from "./generators/ingredient.generator";
 import { generateDailyStockAudits, generateInventoryActivity } from "./generators/inventory.generator";
 import { generateMenu } from "./generators/menu.generator";
+import { generatePayrollData } from "./generators/payroll.generator";
 import { generateRecipes } from "./generators/recipe.generator";
 import { generateRestaurant } from "./generators/restaurant.generator";
 import { generateBranchStaff } from "./generators/user.generator";
 import { generateVendorFinancials, generateVendors } from "./generators/vendor.generator";
+import { generateWhatsAppMessageLogs } from "./generators/whatsapp.generator";
 import { initFaker, resetDemoRestaurantData, resetUniquePools, runStep } from "./utils";
 
 export interface RunSeedOptions {
@@ -48,6 +55,11 @@ const SEED_PLAN: SeedPlanStep[] = [
   { phase: 7, label: "Bills, Orders & Running Orders (~15,000 bills)", done: true },
   { phase: 7, label: "Daily Stock Audit (needs Bill/BillItem data to exist)", done: true },
   { phase: 8, label: "Analytics Validation Report", done: true },
+  { phase: 9, label: "EMI Schedules + Equipment", done: true },
+  { phase: 9, label: "Compliance Records + Monthly Dues", done: true },
+  { phase: 9, label: "WhatsApp Message Logs", done: true },
+  { phase: 9, label: "Leave Requests + Salary Deductions + Payroll Runs", done: true },
+  { phase: 9, label: "Bank Accounts + UPI Configs + Bank Transaction Entries", done: true },
 ];
 
 async function runFoundationPhase(): Promise<SeedContext> {
@@ -88,7 +100,7 @@ async function runFoundationPhase(): Promise<SeedContext> {
       };
       return ctx;
     },
-    { timeout: 30_000 },
+    { timeout: 90_000 },
   );
 }
 
@@ -107,7 +119,7 @@ async function runCatalogPhase(ctx: SeedContext): Promise<{ ctx: SeedContext; pr
 
       return { ctx: { ...withIngredients, vendors, ingredientVendors }, priceHistoryCount: priceHistory.length };
     },
-    { timeout: 60_000 },
+    { timeout: 150_000 },
   );
 }
 
@@ -138,7 +150,7 @@ async function runMenuPhase(ctx: SeedContext): Promise<SeedContext> {
       const menuItemIngredients = await generateRecipes(tx, CONFIG, withMenu);
       return { ...withMenu, menuItemIngredients };
     },
-    { timeout: 60_000 },
+    { timeout: 150_000 },
   );
 }
 
@@ -179,7 +191,7 @@ async function runPeoplePhase(
       const { attendances, breaks } = await generateAttendance(tx, CONFIG, withCustomers);
       return { ctx: withCustomers, attendanceCount: attendances.length, breakCount: breaks.length };
     },
-    { timeout: 60_000 },
+    { timeout: 150_000 },
   );
 }
 
@@ -217,7 +229,7 @@ async function runOperationsPhase(ctx: SeedContext): Promise<{ ctx: SeedContext;
         },
       };
     },
-    { timeout: 120_000 },
+    { timeout: 300_000 },
   );
 }
 
@@ -250,6 +262,75 @@ function logBillingSummary(counts: BillingCounts): void {
   console.log(`  - Bills: ${counts.billCount.toLocaleString("en-IN")}`);
   console.log(`  - Running orders: ${counts.runningOrderCount.toLocaleString("en-IN")}`);
   console.log(`  - Daily stock audits (perishables only): ${counts.stockAuditCount.toLocaleString("en-IN")}`);
+}
+
+interface NewFeatureDataCounts {
+  emiScheduleCount: number;
+  equipmentCount: number;
+  complianceRecordCount: number;
+  monthlyDueCount: number;
+  whatsAppMessageLogCount: number;
+  leaveRequestCount: number;
+  salaryDeductionCount: number;
+  payrollRunCount: number;
+  payrollRunLineCount: number;
+  bankAccountCount: number;
+  upiConfigCount: number;
+  bankTransactionEntryCount: number;
+}
+
+// Equipment/Compliance/Dues/WhatsApp/Payroll/Banking — the 12 tables added by
+// a later feature build than the rest of this seed script. Runs after
+// Billing (Phase 7) because payroll.generator.ts and banking.generator.ts
+// read real Attendance/Bill/VendorPayment rows to compute realistic
+// overtime pay and reconciled transactions, rather than fabricating
+// disconnected numbers.
+async function runNewFeatureDataPhase(ctx: SeedContext): Promise<NewFeatureDataCounts> {
+  return prisma.$transaction(
+    async (tx) => {
+      const emiSchedules = await generateEmiSchedules(tx, CONFIG, ctx);
+      const equipment = await generateEquipment(tx, CONFIG, ctx, emiSchedules);
+      const complianceRecords = await generateComplianceRecords(tx, CONFIG, ctx);
+      const monthlyDues = await generateMonthlyDues(tx, CONFIG, ctx);
+      const whatsAppMessageLogs = await generateWhatsAppMessageLogs(tx, CONFIG, ctx);
+      const { leaveRequests, salaryDeductions, payrollRuns, payrollRunLines } = await generatePayrollData(
+        tx,
+        CONFIG,
+        ctx,
+      );
+      const { bankAccounts, upiConfigs, bankTransactionEntries } = await generateBankingData(tx, CONFIG, ctx);
+
+      return {
+        emiScheduleCount: emiSchedules.length,
+        equipmentCount: equipment.length,
+        complianceRecordCount: complianceRecords.length,
+        monthlyDueCount: monthlyDues.length,
+        whatsAppMessageLogCount: whatsAppMessageLogs.length,
+        leaveRequestCount: leaveRequests.length,
+        salaryDeductionCount: salaryDeductions.length,
+        payrollRunCount: payrollRuns.length,
+        payrollRunLineCount: payrollRunLines.length,
+        bankAccountCount: bankAccounts.length,
+        upiConfigCount: upiConfigs.length,
+        bankTransactionEntryCount: bankTransactionEntries.length,
+      };
+    },
+    { timeout: 300_000 },
+  );
+}
+
+function logNewFeatureDataSummary(counts: NewFeatureDataCounts): void {
+  console.log(`  - EMI schedules: ${counts.emiScheduleCount}`);
+  console.log(`  - Equipment: ${counts.equipmentCount}`);
+  console.log(`  - Compliance records: ${counts.complianceRecordCount}`);
+  console.log(`  - Monthly dues: ${counts.monthlyDueCount}`);
+  console.log(`  - WhatsApp message logs: ${counts.whatsAppMessageLogCount}`);
+  console.log(`  - Leave requests: ${counts.leaveRequestCount}`);
+  console.log(`  - Salary deductions: ${counts.salaryDeductionCount}`);
+  console.log(`  - Payroll runs: ${counts.payrollRunCount} (${counts.payrollRunLineCount} lines)`);
+  console.log(`  - Bank accounts: ${counts.bankAccountCount}`);
+  console.log(`  - UPI configs: ${counts.upiConfigCount}`);
+  console.log(`  - Bank transaction entries: ${counts.bankTransactionEntryCount}`);
 }
 
 function logAnalyticsReport(report: Awaited<ReturnType<typeof validateAnalytics>>): void {
@@ -306,7 +387,14 @@ export async function runSeed(options: RunSeedOptions = {}): Promise<void> {
 
   if (options.fresh) {
     await runStep(`Resetting demo restaurant data ("${CONFIG.demoRestaurantName}" only, --fresh)`, () =>
-      prisma.$transaction((tx) => resetDemoRestaurantData(tx, CONFIG), { timeout: 30_000 }),
+      // 30s was fine when this was written against a smaller dataset; at
+      // 17k+ bills (and everything cascading from them) this hosted
+      // Postgres instance's round-trip latency pushes the ~30 sequential
+      // deleteMany() calls past that window — bumped generously rather than
+      // re-tuned precisely, since a too-short timeout fails safely (the
+      // whole transaction rolls back, confirmed empirically) but a
+      // successful reset is what we actually need here.
+      prisma.$transaction((tx) => resetDemoRestaurantData(tx, CONFIG), { timeout: 600_000 }),
     );
   } else {
     console.log('Skipping reset (pass "--fresh" to delete and recreate the demo restaurant\'s data).');
@@ -343,6 +431,12 @@ export async function runSeed(options: RunSeedOptions = {}): Promise<void> {
     validateAnalytics(prisma, CONFIG, peopleCtx),
   );
   logAnalyticsReport(analyticsReport);
+
+  console.log("\n[Phase 9] Equipment, Compliance, Dues, WhatsApp, Payroll, Banking");
+  const newFeatureCounts = await runStep("Creating equipment/compliance/dues/whatsapp/payroll/banking data", () =>
+    runNewFeatureDataPhase(peopleCtx),
+  );
+  logNewFeatureDataSummary(newFeatureCounts);
 
   console.log("\nSeed plan:");
   for (const step of SEED_PLAN) {

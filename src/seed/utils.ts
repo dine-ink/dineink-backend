@@ -346,6 +346,42 @@ export async function resetDemoRestaurantData(db: Db, config: SeedConfig): Promi
     ["Vendor", () => db.vendor.deleteMany({ where: { restaurantId: r } })],
     ["IngredientCategory", () => db.ingredientCategory.deleteMany({ where: { restaurantId: r } })],
     ["Customer", () => db.customer.deleteMany({ where: { restaurantId: r } })],
+
+    // ── Pre-existing gap, unrelated to any generator this file's imports
+    // touch: the Budget/Scenario/Forecast/Investment/Executive/AI dashboards
+    // feature (added well before the tables below) was never wired into this
+    // reset function, so any row created by using those dashboards (not by
+    // any seed generator — none of these 8 models have one) blocks Branch
+    // deletion via its RESTRICT branchId FK. BudgetItem is Cascade-deleted
+    // by Budget automatically; no separate step needed for it.
+    ["FinancialAssumptions", () => db.financialAssumptions.deleteMany({ where: { restaurantId: r } })],
+    ["Budget", () => db.budget.deleteMany({ where: { restaurantId: r } })],
+    ["FinancialScenario", () => db.financialScenario.deleteMany({ where: { restaurantId: r } })],
+    ["FinancialForecast", () => db.financialForecast.deleteMany({ where: { restaurantId: r } })],
+    ["InvestmentProject", () => db.investmentProject.deleteMany({ where: { restaurantId: r } })],
+    ["ExecutiveKpiTarget", () => db.executiveKpiTarget.deleteMany({ where: { restaurantId: r } })],
+    ["UserDashboardPreference", () => db.userDashboardPreference.deleteMany({ where: { restaurantId: r } })],
+    ["AIInsightLog", () => db.aIInsightLog.deleteMany({ where: { restaurantId: r } })],
+
+    // ── Tables added by a later feature build (Equipment/Compliance/Dues/
+    // WhatsApp/Payroll/Banking) — all carry a plain restaurantId column, and
+    // all must be deleted before Branch (each has a branchId FK) and before
+    // the User deletion below (LeaveRequest/SalaryDeduction/PayrollRunLine
+    // reference userId). PayrollRunLine before PayrollRun, Equipment before
+    // EmiSchedule — the only two internal orderings that matter here.
+    ["PayrollRunLine", () => db.payrollRunLine.deleteMany({ where: { payrollRun: { restaurantId: r } } })],
+    ["PayrollRun", () => db.payrollRun.deleteMany({ where: { restaurantId: r } })],
+    ["LeaveRequest", () => db.leaveRequest.deleteMany({ where: { restaurantId: r } })],
+    ["SalaryDeduction", () => db.salaryDeduction.deleteMany({ where: { restaurantId: r } })],
+    ["Equipment", () => db.equipment.deleteMany({ where: { restaurantId: r } })],
+    ["EmiSchedule", () => db.emiSchedule.deleteMany({ where: { restaurantId: r } })],
+    ["ComplianceRecord", () => db.complianceRecord.deleteMany({ where: { restaurantId: r } })],
+    ["MonthlyDue", () => db.monthlyDue.deleteMany({ where: { restaurantId: r } })],
+    ["WhatsAppMessageLog", () => db.whatsAppMessageLog.deleteMany({ where: { restaurantId: r } })],
+    ["BankTransactionEntry", () => db.bankTransactionEntry.deleteMany({ where: { restaurantId: r } })],
+    ["BankAccount", () => db.bankAccount.deleteMany({ where: { restaurantId: r } })],
+    ["UpiConfig", () => db.upiConfig.deleteMany({ where: { restaurantId: r } })],
+
     // restaurantId is a plain (non-relation) column on RestaurantTable / InvoiceSequence — filter it directly.
     ["RestaurantTable", () => db.restaurantTable.deleteMany({ where: { restaurantId: r } })],
     ["AddOnGroup", () => db.addOnGroup.deleteMany({ where: { restaurantId: r } })],

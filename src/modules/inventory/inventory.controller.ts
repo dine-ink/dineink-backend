@@ -170,8 +170,9 @@ export const getLifecycle = async (req: any, res: Response) => {
 };
 
 // GET /api/inventory/adjustments?branchId=&from=&to=
-export const getAdjustments = async (req: Request, res: Response) => {
+export const getAdjustments = async (req: any, res: Response) => {
   try {
+    const restaurantId = req.user.restaurantId;
     const branchId = Number(req.query.branchId);
     const from = req.query.from as string | undefined;
     const to = req.query.to as string | undefined;
@@ -180,7 +181,7 @@ export const getAdjustments = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: "branchId is required" });
     }
 
-    const data = await getInventoryAdjustmentsService(branchId, from, to);
+    const data = await getInventoryAdjustmentsService(restaurantId, branchId, from, to);
     return res.status(200).json({ success: true, data });
   } catch (error: any) {
     return res.status(400).json({ success: false, message: error.message });

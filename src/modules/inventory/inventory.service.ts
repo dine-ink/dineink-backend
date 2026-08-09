@@ -469,6 +469,22 @@ export const getIngredientLifecycleService = async (
     }),
   ]);
 
+  // Ingredients with NO recipe link at all (restaurant-wide, not just this
+  // month) — almost always Packaging/Cleaning Supplies items (takeaway
+  // boxes, napkins, cleaning spray) that are genuinely consumed by the
+  // business but never go into a dish. The wastage formula below is
+  // "actual consumption minus recipe-expected consumption" — for these
+  // ingredients "recipe-expected" isn't just zero THIS month, it's
+  // structurally undefined (no recipe will EVER explain their usage), so
+  // they must be excluded from the wastage%/aggregate math entirely rather
+  // than defaulting to "0 expected -> ~100% wastage" every month.
+  const allRecipeLinks = await prisma.menuItemIngredient.findMany({
+    where: { menuItem: { restaurantId } },
+    select: { ingredientId: true },
+    distinct: ["ingredientId"],
+  });
+  const ingredientIdsWithRecipe = new Set(allRecipeLinks.map((l) => l.ingredientId));
+
   const bills = await prisma.bill.findMany({
     where: { restaurantId, branchId, status: "PAID", createdAt: { gte: startDate, lte: endDate } },
     select: { items: { select: { menuItemId: true, itemName: true, quantity: true } } },
@@ -621,11 +637,19 @@ export const getIngredientLifecycleService = async (
     const adjEntries = adjByIngredient.get(ingId) || [];
     const loggedWastage = adjEntries.reduce((s: number, a: any) => s + a.qty, 0);
 
+    // Ingredients with no recipe link anywhere (e.g. Packaging/Cleaning
+    // Supplies) have no meaningful "expected consumption" to compare
+    // against — their wastage math is left null/zero rather than computed,
+    // so a takeaway box or a bottle of cleaning spray never shows up as
+    // "wasted" just because it isn't part of a dish recipe.
+    const hasRecipeMapping = ingredientIdsWithRecipe.has(ingId);
+
     // Formula 3: Wastage = Opening + Purchases − Closing − Expected Consumption
     // Positive = wastage (used more than expected), negative = under-used.
-    const wastageQty = consumed - usedInDishes;
+    const wastageQty = hasRecipeMapping ? consumed - usedInDishes : 0;
     // Formula 1: Wastage % = (Wastage Qty / Total Received) × 100
-    const wastagePercentage = available > 0 ? Math.round((wastageQty / available) * 10000) / 100 : 0;
+    const wastagePercentage =
+      hasRecipeMapping && available > 0 ? Math.round((wastageQty / available) * 10000) / 100 : null;
     // Formula 2: Wastage Cost = Wastage Qty × Unit Cost
     const pricePerUnit = (ing as any).pricePerUnit || 0;
     const wastageCost = Math.round(wastageQty * pricePerUnit * 100) / 100;
@@ -645,6 +669,7 @@ export const getIngredientLifecycleService = async (
       consumed: Math.round(consumed * 1000) / 1000,
       expectedConsumption: Math.round(usedInDishes * 1000) / 1000,
       usedInDishesByDish,
+      hasRecipeMapping,
       wastageQty: Math.round(wastageQty * 1000) / 1000,
       wastagePercentage,
       wastageCost,
@@ -660,6 +685,7 @@ export const getIngredientLifecycleService = async (
 
 // ─── getInventoryAdjustmentsService ──────────────────────────────────────────
 export const getInventoryAdjustmentsService = async (
+  restaurantId: number,
   branchId: number,
   from?: string,
   to?: string,
@@ -674,8 +700,22 @@ export const getInventoryAdjustmentsService = async (
         }
       : {};
 
+  // Waste Report should only ever reflect real food ingredients — an
+  // ingredient with no recipe link anywhere in the restaurant (Packaging,
+  // Cleaning Supplies) isn't "wasted" in any meaningful sense, it's just
+  // consumed as an operational supply. Same signal as
+  // getIngredientLifecycleService's hasRecipeMapping, but filtered at the
+  // query level here since this report has no existing "not recipe-tracked"
+  // badge concept to preserve.
+  const recipeLinks = await prisma.menuItemIngredient.findMany({
+    where: { menuItem: { restaurantId } },
+    select: { ingredientId: true },
+    distinct: ["ingredientId"],
+  });
+  const recipeLinkedIngredientIds = recipeLinks.map((l) => l.ingredientId);
+
   return prisma.inventoryAdjustment.findMany({
-    where: { branchId, ...dateFilter },
+    where: { branchId, ingredientId: { in: recipeLinkedIngredientIds }, ...dateFilter },
     include: {
       ingredient: {
         select: { id: true, name: true, unit: true, pricePerUnit: true },

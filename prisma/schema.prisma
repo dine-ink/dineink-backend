@@ -682,6 +682,16 @@ model RestaurantInsights {
   licenses    Float? @default(0)
 
   /**
+   * RENT MODEL — "FIXED" (default, uses monthlyRent above) or
+   * "REVENUE_SHARE" (rent = per-channel % of revenue below). Plain string,
+   * not a DB enum — same convention as BudgetItem.category/ShopExpense.expenseType.
+   */
+  rentModel                String? @default("FIXED")
+  rentSharePercentDineIn   Float?  @default(0)
+  rentSharePercentTakeaway Float?  @default(0)
+  rentSharePercentDelivery Float?  @default(0)
+
+  /**
    * VARIABLE EXPENSES
    */
 

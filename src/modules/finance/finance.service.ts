@@ -86,6 +86,35 @@ const getFoodCostForPeriod = async (
 };
 
 /**
+ * Real per-channel revenue-share rent — Σ(revenue by Bill.orderType × the
+ * matching rentSharePercent* field), for restaurants whose lease charges a
+ * % of sales instead of (or as well as) a flat ₹/month. Reuses the exact
+ * `groupBy(["orderType"])` pattern finance.statements.service.ts's Income
+ * Statement "Revenue by Channel" and analytics.service.ts already use.
+ * Unrecognized/null orderType values contribute 0% (no matching field).
+ */
+const computeRevenueShareRent = async (
+  restaurantId: number,
+  branchId: number,
+  range: DateRange,
+  insights: RestaurantInsightsRow,
+): Promise<number> => {
+  const revenueByType = await prisma.bill.groupBy({
+    by: ["orderType"],
+    where: { restaurantId, branchId, status: "PAID", createdAt: { gte: range.startDate, lte: range.endDate } },
+    _sum: { total: true },
+  });
+  const percentFor: Record<string, number> = {
+    DINE_IN: insights?.rentSharePercentDineIn || 0,
+    TAKEAWAY: insights?.rentSharePercentTakeaway || 0,
+    DELIVERY: insights?.rentSharePercentDelivery || 0,
+  };
+  return Math.round(
+    revenueByType.reduce((sum, r) => sum + (r._sum.total || 0) * ((percentFor[r.orderType || ""] || 0) / 100), 0),
+  );
+};
+
+/**
  * Prorates every RestaurantInsights expense field to the requested period
  * and sums them into fixedExpenses/variableExpenses/financeCost — the exact
  * breakdown computePeriodMetrics needs internally, but exported (with the
@@ -94,21 +123,42 @@ const getFoodCostForPeriod = async (
  * just rent, or just marketing) can do so without re-deriving this same
  * field list a second time.
  */
-export const getExpenseBreakdown = (insights: RestaurantInsightsRow, days: number) => {
+export const getExpenseBreakdown = async (restaurantId: number, branchId: number, range: DateRange, insights: RestaurantInsightsRow, days: number) => {
+  // Rent: either the flat monthly figure prorated (default, identical to the
+  // original single-expression computation below), or — if this branch has
+  // opted into Revenue Share — a live % of the period's real revenue by
+  // channel. Every downstream consumer only ever sees this one number.
+  const rentAmount =
+    insights?.rentModel === "REVENUE_SHARE"
+      ? await computeRevenueShareRent(restaurantId, branchId, range, insights)
+      : prorateMonthly(insights?.monthlyRent, days);
+
   // Totals: prorate the SUM of raw fields once, exactly as the original
   // inline computation did — preserves byte-for-byte identical output for
-  // every existing consumer (Ratio Engine, Statements, Budget). Rounding
-  // happens once per total, not once per field.
-  const fixedExpenses = prorateMonthly(
-    (insights?.monthlyRent || 0) +
-      (insights?.loanEmi || 0) +
-      (insights?.internet || 0) +
-      (insights?.phoneBills || 0) +
-      (insights?.accounting || 0) +
-      (insights?.insurance || 0) +
-      (insights?.licenses || 0),
-    days,
-  );
+  // every existing consumer (Ratio Engine, Statements, Budget) when rent is
+  // FIXED. Rounding happens once per total, not once per field.
+  const fixedExpenses =
+    insights?.rentModel === "REVENUE_SHARE"
+      ? rentAmount +
+        prorateMonthly(
+          (insights?.loanEmi || 0) +
+            (insights?.internet || 0) +
+            (insights?.phoneBills || 0) +
+            (insights?.accounting || 0) +
+            (insights?.insurance || 0) +
+            (insights?.licenses || 0),
+          days,
+        )
+      : prorateMonthly(
+          (insights?.monthlyRent || 0) +
+            (insights?.loanEmi || 0) +
+            (insights?.internet || 0) +
+            (insights?.phoneBills || 0) +
+            (insights?.accounting || 0) +
+            (insights?.insurance || 0) +
+            (insights?.licenses || 0),
+          days,
+        );
   const variableExpenses = prorateMonthly(
     (insights?.deliveryCharges || 0) +
       (insights?.packaging || 0) +
@@ -136,7 +186,7 @@ export const getExpenseBreakdown = (insights: RestaurantInsightsRow, days: numbe
   // rounding drift across untouched components is immaterial for a
   // projection tool; it is never used for the totals returned above.
   const components = {
-    monthlyRent: prorateMonthly(insights?.monthlyRent, days),
+    monthlyRent: rentAmount,
     loanEmi: prorateMonthly(insights?.loanEmi, days),
     internet: prorateMonthly(insights?.internet, days),
     phoneBills: prorateMonthly(insights?.phoneBills, days),
@@ -160,6 +210,47 @@ export const getExpenseBreakdown = (insights: RestaurantInsightsRow, days: numbe
   };
 
   return { components, fixedExpenses, variableExpenses, financeCost };
+};
+
+export interface ShopExpenseLedgerActuals {
+  marketing: number;
+  maintenance: number;
+  packaging: number;
+  deliveryCommission: number;
+}
+
+/**
+ * Real per-transaction ShopExpense totals for the 4 variable-cost categories
+ * with an unambiguous 1:1 expenseType tag (see expense.generator.ts's
+ * addExpense calls: "MARKETING", "MAINTENANCE", "PACKAGING",
+ * "PLATFORM_FEES"). Used only by Budget vs Actual, which wants a true
+ * transaction-ledger actual rather than the static RestaurantInsights
+ * snapshot every other consumer of this module reads. Deliberately excludes
+ * "UTILITIES" — that expenseType tag also covers Internet/Phone bills, which
+ * are budgeted as their own fixed categories, so summing it here would
+ * double-count them.
+ */
+export const getShopExpenseLedgerActuals = async (
+  restaurantId: number,
+  branchId: number | null,
+  range: DateRange,
+): Promise<ShopExpenseLedgerActuals> => {
+  const rows = await prisma.shopExpense.groupBy({
+    by: ["expenseType"],
+    where: {
+      restaurantId,
+      ...(branchId !== null ? { branchId } : {}),
+      expenseDate: { gte: range.startDate, lte: range.endDate },
+    },
+    _sum: { amount: true },
+  });
+  const byType = new Map(rows.map((r) => [r.expenseType, r._sum.amount || 0]));
+  return {
+    marketing: byType.get("MARKETING") || 0,
+    maintenance: byType.get("MAINTENANCE") || 0,
+    packaging: byType.get("PACKAGING") || 0,
+    deliveryCommission: byType.get("PLATFORM_FEES") || 0,
+  };
 };
 
 export interface BranchPayrollPolicy {
@@ -261,7 +352,7 @@ export const computePeriodMetrics = async (
   }, 0);
 
   const labourCost = prorateMonthly(monthlySalarySum, days) + overtimeCost;
-  const { fixedExpenses, variableExpenses, financeCost } = getExpenseBreakdown(insights, days);
+  const { fixedExpenses, variableExpenses, financeCost } = await getExpenseBreakdown(restaurantId, branchId, range, insights, days);
 
   return computeFinancialMetrics({
     revenue,
@@ -356,7 +447,7 @@ export const getFinancialSummaryService = async (
  * pattern, so there is exactly one multi-branch aggregation implementation,
  * not two.
  */
-type ExpenseComponents = ReturnType<typeof getExpenseBreakdown>["components"];
+type ExpenseComponents = Awaited<ReturnType<typeof getExpenseBreakdown>>["components"];
 
 export interface ScopedFinancialBundle {
   metrics: FinancialMetrics;
@@ -370,8 +461,8 @@ export interface ScopedFinancialBundle {
   components: ExpenseComponents;
 }
 
-const scopedExtrasFromBreakdown = (insights: RestaurantInsightsRow, days: number) => {
-  const { components } = getExpenseBreakdown(insights, days);
+const scopedExtrasFromBreakdown = async (restaurantId: number, branchId: number, range: DateRange, insights: RestaurantInsightsRow, days: number) => {
+  const { components } = await getExpenseBreakdown(restaurantId, branchId, range, insights, days);
   return {
     components,
     rent: components.monthlyRent,
@@ -403,7 +494,7 @@ export const resolveScopedMetrics = async (
   if (branchId !== null) {
     const insights = insightsData as RestaurantInsightsRow;
     const metrics = await computePeriodMetrics(restaurantId, branchId, range, insights, menuItemCostMap, payrollPolicyMap);
-    return { metrics, ...scopedExtrasFromBreakdown(insights, days) };
+    return { metrics, ...(await scopedExtrasFromBreakdown(restaurantId, branchId, range, insights, days)) };
   }
 
   const { branchIds, byBranchId } = insightsData as { branchIds: number[]; byBranchId: Map<number, RestaurantInsightsRow> };
@@ -411,7 +502,7 @@ export const resolveScopedMetrics = async (
     branchIds.map(async (id) => {
       const insights = byBranchId.get(id) ?? null;
       const metrics = await computePeriodMetrics(restaurantId, id, range, insights, menuItemCostMap, payrollPolicyMap);
-      return { metrics, insights };
+      return { metrics, insights, id };
     }),
   );
 
@@ -432,8 +523,8 @@ export const resolveScopedMetrics = async (
   };
   const metrics = computeFinancialMetrics(aggregatedInputs);
 
-  const extrasList = perBranch.map((p) => scopedExtrasFromBreakdown(p.insights, days));
-  const sumExtra = (key: keyof Omit<ReturnType<typeof scopedExtrasFromBreakdown>, "components">) =>
+  const extrasList = await Promise.all(perBranch.map((p) => scopedExtrasFromBreakdown(restaurantId, p.id, range, p.insights, days)));
+  const sumExtra = (key: keyof Omit<Awaited<ReturnType<typeof scopedExtrasFromBreakdown>>, "components">) =>
     extrasList.reduce((s, e) => s + e[key], 0);
   const componentKeys = Object.keys(extrasList[0]?.components ?? {}) as (keyof ExpenseComponents)[];
   const summedComponents = Object.fromEntries(
