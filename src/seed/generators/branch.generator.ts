@@ -1,3 +1,4 @@
+import { subMonths } from "date-fns";
 import type { BillingSettings, Branch, RestaurantInsights, RestaurantTable } from "../../../generated/prisma";
 import type { BranchSeedConfig, SeedConfig } from "../config";
 import { type Db, indianMobile, randomFloat, randomInt, slugify, weightedPickNumber } from "../utils";
@@ -17,7 +18,7 @@ function estimateMonthlyRevenue(config: SeedConfig): number {
   return billsPerMonth * config.billing.averageBillAmount;
 }
 
-async function ensureBranch(db: Db, restaurantId: number, branchConfig: BranchSeedConfig): Promise<Branch> {
+async function ensureBranch(db: Db, config: SeedConfig, restaurantId: number, branchConfig: BranchSeedConfig): Promise<Branch> {
   const existing = await db.branch.findFirst({ where: { restaurantId, name: branchConfig.name } });
   if (existing) {
     // Only sync the fields that come straight from config — address/phone/
@@ -47,6 +48,12 @@ async function ensureBranch(db: Db, restaurantId: number, branchConfig: BranchSe
       openingTime: branchConfig.openingTime,
       closingTime: branchConfig.closingTime,
       areaSqFt: branchConfig.areaSqFt,
+      // Backdated to match the Bill history bill.generator.ts is about to
+      // create (historyDateRange(config.history.monthsOfHistory)) — otherwise
+      // forecast.service.ts's maxCompletePeriodsSince sees a "brand-new"
+      // branch (createdAt = now) and refuses to look back over the very
+      // history this seed run is creating, reporting 0 historical periods.
+      createdAt: subMonths(new Date(), config.history.monthsOfHistory),
     },
   });
 }
@@ -189,7 +196,7 @@ export async function generateBranch(
   restaurantId: number,
   branchConfig: BranchSeedConfig,
 ): Promise<BranchSeedResult> {
-  const branch = await ensureBranch(db, restaurantId, branchConfig);
+  const branch = await ensureBranch(db, config, restaurantId, branchConfig);
   const billingSettings = await ensureBillingSettings(db, config, branch.id);
   const insights = await ensureInsights(db, config, restaurantId, branch.id, branchConfig);
   const tables = await ensureTables(db, config, restaurantId, branch.id);

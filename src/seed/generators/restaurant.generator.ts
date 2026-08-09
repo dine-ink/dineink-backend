@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { subMonths } from "date-fns";
 import type { DiscountCode, Restaurant, User } from "../../../generated/prisma";
 import type { SeedConfig } from "../config";
 import { addDays, type Db } from "../utils";
@@ -109,6 +110,12 @@ export async function generateRestaurant(db: Db, config: SeedConfig): Promise<Re
       address: config.restaurant.address,
       gstNumber: config.restaurant.gstNumber,
       ownerId: owner.id,
+      // Backdated to match the Bill history bill.generator.ts is about to
+      // create (historyDateRange(config.history.monthsOfHistory)) — otherwise
+      // forecast.service.ts's maxCompletePeriodsSince sees a "brand-new"
+      // restaurant (createdAt = now) and refuses to look back over the very
+      // history this seed run is creating, reporting 0 historical periods.
+      createdAt: subMonths(new Date(), config.history.monthsOfHistory),
     },
   });
 
