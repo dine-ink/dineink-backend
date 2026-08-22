@@ -139,7 +139,7 @@ export const CONFIG = {
   },
 
   history: {
-    monthsOfHistory: 3,
+    monthsOfHistory: 12,
     // Bills/day/branch. NOTE: calibrated (not the illustrative 90/180 some
     // specs use) so 3 branches x ~13 weeks lands near the ~15,000-bill
     // target overall — see estimateTotalBills() below. Raise/lower freely;

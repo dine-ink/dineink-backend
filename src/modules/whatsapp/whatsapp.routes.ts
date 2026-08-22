@@ -1,5 +1,13 @@
 import express from "express";
-import { sendWhatsAppMessage, getWhatsAppLogs } from "./whatsapp.controller";
+import {
+  sendWhatsAppMessage,
+  getWhatsAppLogs,
+  createTemplate,
+  listTemplates,
+  updateTemplate,
+  deleteTemplate,
+  sendBulkWhatsAppMessage,
+} from "./whatsapp.controller";
 import { authMiddleware } from "../../middleware/auth";
 import { requireOwnRestaurant, requireRole } from "../../middleware/authorize";
 
@@ -12,5 +20,11 @@ router.use(authMiddleware, requireRole("OWNER", "MANAGER"));
 
 router.post("/send", sendWhatsAppMessage);
 router.get("/:restaurantId", requireOwnRestaurant(), getWhatsAppLogs);
+
+router.post("/templates/:restaurantId", requireOwnRestaurant(), createTemplate);
+router.get("/templates/:restaurantId", requireOwnRestaurant(), listTemplates);
+router.put("/templates/:restaurantId/:templateId", requireOwnRestaurant(), updateTemplate);
+router.delete("/templates/:restaurantId/:templateId", requireOwnRestaurant(), deleteTemplate);
+router.post("/send-bulk/:restaurantId", requireOwnRestaurant(), sendBulkWhatsAppMessage);
 
 export default router;

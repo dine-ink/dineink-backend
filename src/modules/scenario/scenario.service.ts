@@ -40,24 +40,51 @@ const pickOverrides = (row: Record<string, any>): ScenarioOverrides => {
   return overrides;
 };
 
-/** Creates the 3 built-in scenarios for a restaurant/branch scope if they don't already exist — idempotent, safe to call on every list request. */
+/**
+ * Creates the 3 built-in scenarios for a restaurant/branch scope if they
+ * don't already exist, AND keeps existing rows' assumption fields in sync
+ * with BUILT_IN_SCENARIOS — idempotent, safe to call on every list request.
+ * Built-ins are meant to be a fixed reference point every restaurant shares
+ * (see updateScenarioService's own lock on editing them); without this sync
+ * step, a row created before a config change (or by an older buggy version
+ * of this function) would silently drift and keep stale values forever,
+ * since nothing else ever writes to a built-in's override fields.
+ */
 export const ensureBuiltInScenariosService = async (restaurantId: number, branchId: number | null) => {
   const existing = await prisma.financialScenario.findMany({
     where: { restaurantId, branchId, type: { in: ["CONSERVATIVE", "EXPECTED", "OPTIMISTIC"] } },
-    select: { type: true },
+    select: { id: true, type: true, ...Object.fromEntries(SCENARIO_OVERRIDE_FIELDS.map((f) => [f, true])) },
   });
-  const existingTypes = new Set(existing.map((e) => e.type));
+  const existingByType = new Map(existing.map((e) => [e.type, e]));
 
-  const missing = BUILT_IN_SCENARIOS.filter((b) => !existingTypes.has(b.type as any));
-  if (missing.length === 0) return;
+  // Every field explicit (config's value, or null for anything the config
+  // doesn't set) — not a spread of just b.overrides' keys, so a field that
+  // drifted to some other non-null value gets reset to null too, not just
+  // fields the config happens to specify.
+  const fullOverridesFor = (b: (typeof BUILT_IN_SCENARIOS)[number]) =>
+    Object.fromEntries(SCENARIO_OVERRIDE_FIELDS.map((f) => [f, b.overrides[f] ?? null]));
 
-  await prisma.$transaction(
-    missing.map((b) =>
+  const toCreate = BUILT_IN_SCENARIOS.filter((b) => !existingByType.has(b.type as any));
+  const toSync = BUILT_IN_SCENARIOS.filter((b) => {
+    const row = existingByType.get(b.type as any);
+    if (!row) return false;
+    return SCENARIO_OVERRIDE_FIELDS.some((f) => ((row as any)[f] ?? null) !== (b.overrides[f] ?? null));
+  });
+  if (toCreate.length === 0 && toSync.length === 0) return;
+
+  await prisma.$transaction([
+    ...toCreate.map((b) =>
       prisma.financialScenario.create({
-        data: { restaurantId, branchId, name: b.name, description: b.description, type: b.type as any, ...b.overrides },
+        data: { restaurantId, branchId, name: b.name, description: b.description, type: b.type as any, ...fullOverridesFor(b) },
       }),
     ),
-  );
+    ...toSync.map((b) =>
+      prisma.financialScenario.update({
+        where: { id: existingByType.get(b.type as any)!.id },
+        data: fullOverridesFor(b),
+      }),
+    ),
+  ]);
 };
 
 export const createScenarioService = async (
@@ -113,7 +140,17 @@ export const updateScenarioService = async (
   payload: { name?: string; description?: string | null; isActive?: boolean; overrides?: ScenarioOverrides },
   updatedById?: number,
 ) => {
-  await findOwnedScenario(restaurantId, scenarioId);
+  const scenario = await findOwnedScenario(restaurantId, scenarioId);
+  // Conservative/Expected/Optimistic are fixed reference points (-5%/0/+10%
+  // revenue & order growth — see BUILT_IN_SCENARIOS) that every restaurant
+  // shares; letting them drift from that definition would make them
+  // meaningless as a common baseline. isActive (archive/reactivate) is still
+  // allowed on any type — only the assumption VALUES are locked. Anyone
+  // wanting to tweak assumptions should clone the built-in into a Custom
+  // scenario (cloneScenarioService already produces a CUSTOM copy) instead.
+  if (scenario.type !== "CUSTOM" && payload.overrides !== undefined) {
+    throw new ValidationError("Built-in scenarios' assumptions are fixed and can't be edited — clone it into a Custom scenario to customize.");
+  }
   const { overrides, ...rest } = payload;
   return prisma.financialScenario.update({
     where: { id: scenarioId },
@@ -387,6 +424,41 @@ export const runWhatIfService = async (
     };
   });
 
+  const singleBranchInsights = insightsDataIsSingleBranch(insightsData) ? insightsData : null;
+
+  // The real number in effect for each override field when it's left blank —
+  // returned so the frontend can show it instead of a bare "Inherit" label.
+  // Mirrors applyScenarioOverrides' own fallback semantics exactly (e.g. the
+  // escalator fields fall back to 0%/flat when unset, NOT to Financial
+  // Assumptions' own configured rate — see that function's header comment),
+  // not a second re-derivation of the same logic. deliveryPercentage/
+  // swiggyCommissionPercentage/zomatoCommissionPercentage/royaltyPercentage/
+  // franchiseFeePercentage/workingDays/businessHours don't feed the
+  // projection at all yet (same doc comment), so their "current value" is
+  // just the configured assumption, shown for reference only.
+  const currentValues: Record<ScenarioOverrideField, number | null> = {
+    revenueGrowthPercentage: 0,
+    orderGrowthPercentage: 0,
+    avgOrderValue: Math.round(baselineBundle.metrics.avgOrderValue),
+    foodCostTargetPercentage: baselineBundle.metrics.revenue > 0 ? Math.round(baselineBundle.metrics.foodCostPercentage * 10) / 10 : null,
+    labourTargetPercentage: baselineBundle.metrics.revenue > 0 ? Math.round(baselineBundle.metrics.labourCostPercentage * 10) / 10 : null,
+    rent: singleBranchInsights?.monthlyRent ?? null,
+    utilities: singleBranchInsights ? (singleBranchInsights.electricity || 0) + (singleBranchInsights.gas || 0) : null,
+    marketing: singleBranchInsights?.marketingSpend ?? null,
+    maintenance: singleBranchInsights?.maintenance ?? null,
+    packaging: singleBranchInsights?.packaging ?? null,
+    salaryIncrementPercentage: 0,
+    inflationPercentage: 0,
+    rentEscalationPercentage: 0,
+    deliveryPercentage: assumptions.deliveryPercentage,
+    swiggyCommissionPercentage: assumptions.swiggyCommissionPercentage,
+    zomatoCommissionPercentage: assumptions.zomatoCommissionPercentage,
+    royaltyPercentage: assumptions.royaltyPercentage,
+    franchiseFeePercentage: assumptions.franchiseFeePercentage,
+    workingDays: assumptions.workingDays,
+    businessHours: assumptions.businessHours,
+  };
+
   return {
     scenarioId,
     restaurantId,
@@ -395,6 +467,7 @@ export const runWhatIfService = async (
     startDate: range.startDate.toISOString(),
     endDate: range.endDate.toISOString(),
     kpis,
+    currentValues,
   };
 };
 

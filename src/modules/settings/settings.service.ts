@@ -55,6 +55,18 @@ export const updateBranchesService = async (body: any) => {
         fullDayShiftHours: Number(branch.fullDayShiftHours) || 10,
         overtimeRateMultiplier: Number(branch.overtimeRateMultiplier) || 1.5,
         areaSqFt: branch.areaSqFt ? Number(branch.areaSqFt) : null,
+        // Kitchen capacity policy. Nullable on purpose — `|| null` rather than a
+        // default, because a guessed hourly ceiling would silently drive
+        // bottleneck detection (peakHour.formulas.ts's computeBottleneckStatus
+        // deliberately makes NO assessment when this is unset, and an invented
+        // number would replace "no assessment" with a wrong one).
+        kitchenCapacityPerHour: branch.kitchenCapacityPerHour ? Number(branch.kitchenCapacityPerHour) : null,
+        autoThrottleEnabled: branch.autoThrottleEnabled ?? false,
+        // Labor engine policy. These DO have sane defaults (0.75 productive
+        // fraction, 30-minute ticket target) since both are conventional
+        // planning figures rather than facts about this specific kitchen.
+        staffUtilizationFactor: branch.staffUtilizationFactor ? Number(branch.staffUtilizationFactor) : 0.75,
+        targetTicketMinutes: branch.targetTicketMinutes ? Number(branch.targetTicketMinutes) : 30,
         isDeleted: branch.isDeleted ?? false,
       };
 

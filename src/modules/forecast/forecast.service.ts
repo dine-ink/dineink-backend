@@ -75,9 +75,16 @@ const CASH_FLOW_HORIZON_BY_PERIOD: Partial<Record<ForecastPeriodTypeValue, CashF
   NEXT_QUARTER: "quarter",
 };
 
-/** The future date range being predicted, anchored on "now". */
-export const resolveTargetRange = (periodType: ForecastPeriodTypeValue): DateRange => {
-  const now = new Date();
+/**
+ * The future date range being predicted, anchored on `asOf` (defaults to
+ * real "now"). The override exists solely so a forecast can be regenerated
+ * as-of a past moment — e.g. backfilling what "next month" would have
+ * predicted back when that month was still in the future, for Forecast vs
+ * Actual accuracy tracking on periods that already completed before this
+ * feature was ever exercised. Every production call site omits it.
+ */
+export const resolveTargetRange = (periodType: ForecastPeriodTypeValue, asOf: Date = new Date()): DateRange => {
+  const now = asOf;
   const { granularity, horizon } = HORIZON_BY_PERIOD[periodType];
   if (granularity === "week") {
     const nextWeekAnchor = new Date(startOfWeek(now));
@@ -89,9 +96,9 @@ export const resolveTargetRange = (periodType: ForecastPeriodTypeValue): DateRan
   return { startDate: startOfMonth(nextMonthAnchor), endDate: endOfMonth(lastMonthAnchor) };
 };
 
-/** The last `count` COMPLETE historical periods (never the current, still-in-progress one), oldest first. */
-const historicalRanges = (granularity: ForecastGranularity, count: number): DateRange[] => {
-  const now = new Date();
+/** The last `count` COMPLETE historical periods relative to `asOf` (never the period `asOf` itself falls in), oldest first. See resolveTargetRange's comment on why `asOf` is overridable. */
+const historicalRanges = (granularity: ForecastGranularity, count: number, asOf: Date = new Date()): DateRange[] => {
+  const now = asOf;
   const ranges: DateRange[] = [];
   for (let i = count; i >= 1; i--) {
     if (granularity === "week") {
@@ -106,9 +113,9 @@ const historicalRanges = (granularity: ForecastGranularity, count: number): Date
   return ranges;
 };
 
-/** Caps how far back history is fetched to how long the scope has actually existed — a new branch shouldn't fire 24 parallel queries for months before it opened. */
-const maxCompletePeriodsSince = (createdAt: Date, granularity: ForecastGranularity, cap: number): number => {
-  const now = new Date();
+/** Caps how far back history is fetched to how long the scope had existed as of `asOf` — a new branch shouldn't fire 24 parallel queries for months before it opened. See resolveTargetRange's comment on why `asOf` is overridable. */
+const maxCompletePeriodsSince = (createdAt: Date, granularity: ForecastGranularity, cap: number, asOf: Date = new Date()): number => {
+  const now = asOf;
   if (granularity === "week") {
     const weeksElapsed = Math.floor((startOfWeek(now).getTime() - startOfWeek(createdAt).getTime()) / (7 * 86_400_000));
     return Math.max(0, Math.min(cap, weeksElapsed));
@@ -239,9 +246,11 @@ export const generateForecastService = async (
   requestedModel: ForecastModelValue,
   createdById?: number,
   persist = true,
+  /** See resolveTargetRange's comment — overridden only when backfilling a snapshot for a period that's already completed; every production call site omits it. */
+  asOfDate: Date = new Date(),
 ): Promise<ForecastResult> => {
   const { granularity, horizon } = HORIZON_BY_PERIOD[periodType];
-  const targetRange = resolveTargetRange(periodType);
+  const targetRange = resolveTargetRange(periodType, asOfDate);
 
   const scope = branchId !== null
     ? await prisma.branch.findUnique({ where: { id: branchId }, select: { createdAt: true } })
@@ -249,8 +258,8 @@ export const generateForecastService = async (
   if (!scope) throw new ValidationError("Restaurant or branch not found");
 
   const cap = granularity === "week" ? MAX_HISTORICAL_WEEKS : MAX_HISTORICAL_MONTHS;
-  const count = maxCompletePeriodsSince(scope.createdAt, granularity, cap);
-  const ranges = historicalRanges(granularity, count);
+  const count = maxCompletePeriodsSince(scope.createdAt, granularity, cap, asOfDate);
+  const ranges = historicalRanges(granularity, count, asOfDate);
 
   const [insightsData, assumptions, menuItemCostMap, payrollPolicyMap] = await Promise.all([
     fetchInsightsForScope(restaurantId, branchId),
@@ -790,12 +799,16 @@ export const getDemandForecastService = async (
       unit: ing.unit,
       historicalDailyAverage,
       projectedDailyConsumption: projected.rate,
+      // The rate × the target period's own day count — e.g. NEXT_MONTH's
+      // real day count, not a flat 30 — so "Projected Total" genuinely
+      // matches the selected period, not just the trailing lookback window.
+      projectedTotalConsumption: Math.round(projected.rate * horizonDays * 1000) / 1000,
       modelUsed: projected.modelUsed,
       confidence: projected.confidence,
     };
   });
 
-  return { restaurantId, branchId, periodType, requestedModel, trailingDaysAnalyzed: DEMAND_TRAILING_DAYS, items };
+  return { restaurantId, branchId, periodType, requestedModel, trailingDaysAnalyzed: DEMAND_TRAILING_DAYS, horizonDays, items };
 };
 
 /**

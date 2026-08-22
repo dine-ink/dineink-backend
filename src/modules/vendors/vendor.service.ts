@@ -138,7 +138,10 @@ export const getVendorOutstandingService = async (
   branchId: number,
 ) => {
   const [vendors, invoices, payments] = await Promise.all([
-    prisma.vendor.findMany({ where: { restaurantId, branchId } }),
+    // Vendor.branchId is nullable — null means "supplies every branch"; an
+    // exact-match filter silently excluded those (see ingredient.service.ts's
+    // fetchVendorsData for the same fix).
+    prisma.vendor.findMany({ where: { restaurantId, OR: [{ branchId }, { branchId: null }] } }),
     // Naturally self-limiting — only currently-unpaid invoices, not full history.
     prisma.vendorInvoice.findMany({
       where: { restaurantId, branchId, status: { not: "PAID" } },
@@ -197,7 +200,10 @@ export const getVendorPerformanceService = async (
       : {};
 
   const [vendors, invoices, ingredientLinks] = await Promise.all([
-    prisma.vendor.findMany({ where: { restaurantId, branchId } }),
+    // Vendor.branchId is nullable — null means "supplies every branch"; an
+    // exact-match filter silently excluded those (see ingredient.service.ts's
+    // fetchVendorsData for the same fix).
+    prisma.vendor.findMany({ where: { restaurantId, OR: [{ branchId }, { branchId: null }] } }),
     prisma.vendorInvoice.findMany({
       where: { restaurantId, branchId, ...dateFilter },
       // Matches the same VENDOR_HISTORY_LIMIT bound already applied to this

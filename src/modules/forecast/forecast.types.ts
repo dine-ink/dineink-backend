@@ -121,6 +121,8 @@ export interface DemandForecastItem {
   unit: string | null;
   historicalDailyAverage: number;
   projectedDailyConsumption: number;
+  /** projectedDailyConsumption × the result's own horizonDays — total expected consumption across the whole target period, not just one day. */
+  projectedTotalConsumption: number;
   modelUsed: ForecastModelValue;
   confidence: ConfidenceLevel;
 }
@@ -131,6 +133,8 @@ export interface DemandForecastResult {
   periodType: ForecastPeriodTypeValue;
   requestedModel: ForecastModelValue;
   trailingDaysAnalyzed: number;
+  /** Day count of the target period (periodType resolved via resolveTargetRange) that projectedTotalConsumption was scaled over. */
+  horizonDays: number;
   items: DemandForecastItem[];
 }
 

@@ -156,7 +156,11 @@ export const generateInsightsService = async (
 
   if (peakHourForecast) {
     insights.push(
-      predictedStockOutRisk(stockOutFlagged, ["/dashboard/inventory"]),
+      // "/dashboard/daily-stock-audit" (NOT "/dashboard/inventory", which is
+      // not a route owner-web declares — see owner-web/src/routes; the old
+      // value rendered a dead deep link on every stock-out insight). The
+      // stock audit screen is where an owner acts on a projected stock-out.
+      predictedStockOutRisk(stockOutFlagged, ["/dashboard/daily-stock-audit"]),
       predictedStaffShortfallRisk(peakHourForecast.projectedStaffRequirement, currentActiveStaffCount, ["/dashboard/attendance", "/dashboard/forecasting"]),
       growingPeakHourDemandOpportunity(peakHourForecast, ["/dashboard/forecasting"]),
     );

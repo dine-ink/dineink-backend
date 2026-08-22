@@ -333,6 +333,17 @@ async function deriveConsumptionFromDb(db: Db, ctx: SeedContext): Promise<DailyI
  * openingQty), seeded from the ingredient's live `quantity` on the first
  * audited day.
  *
+ * A restock is injected into the chain whenever the running balance drops to
+ * (or below) a reorder threshold, sized off this ingredient/branch's own
+ * average daily consumption — mirroring a kitchen reordering before running
+ * out, not after. Without this, `quantity` is only ever a few days' worth of
+ * real perishable demand (Tomato/Vegetables etc. easily move 10+ Kg/day per
+ * branch), so the un-replenished balance hits 0 within the first week and
+ * `Math.max(0, ...)` clamps it there for the rest of the year — every
+ * "Opening"/"Expected" the Daily Stock Audit screen shows for any date past
+ * that point reads 0, even though ingredient.quantity/InventoryRestock both
+ * have real, nonzero figures elsewhere in the app.
+ *
  * Idempotent: generates once per restaurant, checked via a plain count().
  */
 export async function generateDailyStockAudits(
@@ -361,10 +372,22 @@ export async function generateDailyStockAudits(
     const branchConsumption = consumptionMap.get(branchCtx.branch.id);
 
     for (const ingredient of perishableIngredients) {
+      const dailyValues = days.map((day) => branchConsumption?.get(day.toISOString().slice(0, 10))?.get(ingredient.id) ?? 0);
+      const avgDailyConsumption = dailyValues.reduce((s, v) => s + v, 0) / Math.max(1, dailyValues.length);
+      // ~2 days' buffer triggers a reorder; restocked back up to ~1 week's
+      // worth — same cadence buildRestockRow already assumes (2-3 purchase
+      // days per week), just applied to this independent daily chain too.
+      const restockThreshold = Math.max(ingredient.reorderLevel || 1, avgDailyConsumption * 2);
+      const restockTarget = Math.max(ingredient.reorderLevel || 1, avgDailyConsumption * randomFloat(6, 9));
+
       let openingQty = ingredient.quantity ?? 0;
 
       for (const day of days) {
         const dateKey = day.toISOString().slice(0, 10);
+        if (openingQty <= restockThreshold) {
+          const restockQty = Math.round(Math.max(0, restockTarget - openingQty) * randomFloat(0.9, 1.15) * 1000) / 1000;
+          openingQty = Math.round((openingQty + restockQty) * 1000) / 1000;
+        }
         const sopConsumed = Math.round((branchConsumption?.get(dateKey)?.get(ingredient.id) ?? 0) * 1000) / 1000;
         const wastageNoise = Math.round(openingQty * randomFloat(0, 0.03) * 1000) / 1000;
         const rawClosing = openingQty - sopConsumed - wastageNoise;

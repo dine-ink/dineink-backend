@@ -355,8 +355,12 @@ export const uploadVendors = async (
 };
 
 export const fetchVendorsData = async (restaurantId: number, branchId: number) => {
+  // Vendor.branchId is nullable — null means "supplies every branch" (the
+  // seed generator creates every vendor this way). An exact-match filter
+  // silently excluded all of them whenever a specific branch was selected,
+  // since SQL `branchId = <id>` never matches NULL.
   return prisma.vendor.findMany({
-    where: { restaurantId, branchId },
+    where: { restaurantId, OR: [{ branchId }, { branchId: null }] },
     orderBy: { name: "asc" },
   });
 };

@@ -63,12 +63,14 @@ model Restaurant {
   complianceRecords        ComplianceRecord[]
   monthlyDues              MonthlyDue[]
   whatsAppMessageLogs      WhatsAppMessageLog[]
+  whatsAppTemplates        WhatsAppTemplate[]
   leaveRequests            LeaveRequest[]
   salaryDeductions         SalaryDeduction[]
   payrollRuns              PayrollRun[]
   bankAccounts             BankAccount[]
   upiConfigs               UpiConfig[]
   bankTransactionEntries   BankTransactionEntry[]
+  kitchenStations          KitchenStation[]
 
   @@index([ownerId])
 }
@@ -139,12 +141,28 @@ model Branch {
   bankAccounts           BankAccount[]
   upiConfigs             UpiConfig[]
   bankTransactionEntries BankTransactionEntry[]
+  kitchenStations        KitchenStation[]
 
   // Kitchen capacity policy for Peak Hour Depletion — hourly order-count
   // ceiling used for bottleneck detection, and whether exceeding it should
   // flag new orders for a manual hold suggestion (never a silent auto-reject).
   kitchenCapacityPerHour Int?
   autoThrottleEnabled    Boolean @default(false)
+
+  // Labor & Capacity Engine policy. staffUtilizationFactor is the branch-wide
+  // default fraction of a clock hour a kitchen staff member is actually
+  // producing food (the rest goes to walking, cleaning, fetching ingredients,
+  // coordination, task switching) — a KitchenStation may override it. Applied
+  // as: productive minutes per staff per hour = 60 * factor.
+  //
+  // targetTicketMinutes is the service-level target the staffing plan is
+  // solved against. Deliberately NOT wired into the pre-existing 30-minute
+  // SLA_MINUTES in analyticsAdvanced.service.ts / Kitchen Analytics — that
+  // constant defines the historical "SLA Compliance %" metric and changing
+  // its basis would silently rewrite every past SLA number an owner has
+  // already seen. This field governs the labor engine only.
+  staffUtilizationFactor Float? @default(0.75)
+  targetTicketMinutes    Int?   @default(30)
 
   @@index([restaurantId])
 }
@@ -183,10 +201,12 @@ model User {
   financialForecastsCreated   FinancialForecast[]      @relation("FinancialForecastCreatedBy")
   investmentProjectsCreated   InvestmentProject[]      @relation("InvestmentProjectCreatedBy")
   executiveKpiTargetsUpdated  ExecutiveKpiTarget[]     @relation("ExecutiveKpiTargetUpdatedBy")
+  whatsAppTemplatesCreated    WhatsAppTemplate[]       @relation("WhatsAppTemplateCreatedBy")
   dashboardPreference         UserDashboardPreference?
   leaveRequests               LeaveRequest[]
   salaryDeductions            SalaryDeduction[]
   payrollRunLines             PayrollRunLine[]
+  stationSkills               StaffStationSkill[]
 }
 
 model EmailOtp {
@@ -280,6 +300,7 @@ model MenuItem {
   menuItemIngredients MenuItemIngredient[]
   sopChecklists       SopChecklist[]
   addOnGroups         MenuItemAddOnGroup[]
+  stationTimes        MenuItemStationTime[]
 
   @@index([restaurantId])
   @@index([branchId])
@@ -1392,6 +1413,18 @@ model Equipment {
   capacity               String?
   volume                 String?
   itemCapacityCount      Int?
+
+  // Sustained throughput of this unit, in items per hour — the rate that
+  // actually constrains a kitchen. Distinct from itemCapacityCount above,
+  // which is a BATCH size ("6 pizzas fit in the oven at once") and says
+  // nothing about how long a batch takes. A station's ceiling is the sum of
+  // its active units' itemsPerHour.
+  itemsPerHour           Int?
+
+  // Which kitchen station this unit belongs to, so equipment throughput can
+  // be rolled up per station for bottleneck attribution. Optional — plenty of
+  // equipment (billing printer, deep freezer) belongs to no cooking station.
+  stationId              Int?
   powerConsumptionKw     Float?
   purchasePrice          Float?
   purchaseDate           DateTime?
@@ -1408,13 +1441,15 @@ model Equipment {
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
-  restaurant  Restaurant   @relation(fields: [restaurantId], references: [id])
-  branch      Branch       @relation(fields: [branchId], references: [id])
-  emiSchedule EmiSchedule? @relation(fields: [emiScheduleId], references: [id])
+  restaurant  Restaurant      @relation(fields: [restaurantId], references: [id])
+  branch      Branch          @relation(fields: [branchId], references: [id])
+  emiSchedule EmiSchedule?    @relation(fields: [emiScheduleId], references: [id])
+  station     KitchenStation? @relation(fields: [stationId], references: [id])
 
   @@index([restaurantId])
   @@index([branchId])
   @@index([emiScheduleId])
+  @@index([stationId])
 }
 
 model ComplianceRecord {
@@ -1501,6 +1536,29 @@ model WhatsAppMessageLog {
 
   @@index([restaurantId])
   @@index([branchId])
+}
+
+/**
+ * A reusable bulk-marketing message body — capped at 5 per restaurant
+ * (enforced in whatsapp.service.ts, not here; every other "at most N"
+ * constraint in this schema is a service-layer check, not a DB one — see
+ * cash.service.ts's single-open-session guard for the same pattern).
+ * `message` may contain a `{{name}}` placeholder, substituted per-recipient
+ * with their real name when a bulk send goes out.
+ */
+model WhatsAppTemplate {
+  id           Int      @id @default(autoincrement())
+  restaurantId Int
+  name         String
+  message      String
+  createdById  Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  createdBy  User?      @relation("WhatsAppTemplateCreatedBy", fields: [createdById], references: [id])
+
+  @@index([restaurantId])
 }
 
 // ── Payroll extensions (Cash Flow Predictor sub-features) ────────────────────
@@ -1940,4 +1998,131 @@ model ProcurementPriceSnapshot {
 
   @@index([supplierId, searchTerm, city])
   @@index([searchTerm, capturedAt])
+}
+
+// ─── Labor & Kitchen Capacity Engine ─────────────────────────────────────────
+//
+// Before these tables, kitchen load was modelled as a flat order count divided
+// by one global constant (peakHour.formulas.ts's DEFAULT_ORDERS_PER_STAFF_HOUR
+// = 8 orders/staff/hour). That model cannot answer the question an owner
+// actually has — "am I short of PEOPLE or short of EQUIPMENT?" — because it has
+// no concept of where in the kitchen the work happens. A single number also
+// hides that 40 burgers and 40 biryanis are wildly different workloads.
+//
+// These three tables add the missing dimension (station), and with it:
+//   station workload minutes = Σ (forecast qty × per-station minutes per item)
+//   required staff           = workload minutes ÷ (window × utilizationFactor)
+//   equipment-bound?         = demand items/hour vs station capacityPerHour
+// See modules/labor/labor.formulas.ts for the arithmetic, which is pure and
+// unit-tested, and modules/labor/labor.engine.service.ts for the pipeline.
+
+model KitchenStation {
+  id           Int    @id @default(autoincrement())
+  restaurantId Int
+  branchId     Int
+  name         String
+
+  // Stable uppercase key (GRILL, FRYER, PREP, PLATING, TANDOOR…), unique per
+  // branch. Labor standards and seeded defaults are matched on code rather
+  // than display name so renaming "Grill" to "Grill / Griddle" doesn't orphan
+  // every menu item's standard time.
+  code String
+
+  // Fraction of a clock hour a person at this station is actually producing
+  // food. Per-station because a plating pass is far more continuously occupied
+  // than a prep bench. Null = inherit the branch's staffUtilizationFactor.
+  utilizationFactor Float?
+
+  // Physical items/hour ceiling of the station itself, independent of
+  // headcount — one pizza oven does not go faster because two people stand at
+  // it. Null = fall back to summing linked Equipment.itemsPerHour; if that is
+  // also empty, NO equipment assessment is made rather than guessing a
+  // threshold (same "no assessment possible" stance as
+  // peakHour.formulas.ts's computeBottleneckStatus).
+  capacityPerHour Int?
+
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  createdById Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  restaurant    Restaurant            @relation(fields: [restaurantId], references: [id])
+  branch        Branch                @relation(fields: [branchId], references: [id])
+  equipment     Equipment[]
+  menuItemTimes MenuItemStationTime[]
+  staffSkills   StaffStationSkill[]
+
+  @@unique([branchId, code])
+  @@index([restaurantId])
+  @@index([branchId])
+}
+
+// Per-item labor standard AT ONE STATION — the "don't only store total
+// preparation time, store station-specific task time" requirement. MenuItem
+// already carries a single prepTime (whole-item minutes, used for customer-
+// facing ETA display); that field is left untouched and is NOT the same thing:
+// a burger's 8 total minutes might be 4 grill + 2 fryer + 1 prep + 1 plating,
+// and only the split tells you which station saturates first.
+model MenuItemStationTime {
+  id         Int @id @default(autoincrement())
+  menuItemId Int
+  stationId  Int
+
+  // Owner-entered expected labor minutes for ONE unit of this item at this
+  // station.
+  standardMinutes Float
+
+  // Calibrated-from-actuals minutes, written by the labor learning pass
+  // (labor.learning.service.ts) once enough completed orders have been
+  // observed. Null until then. Kept SEPARATE from standardMinutes so the
+  // owner's entered standard is never silently overwritten and the two can be
+  // shown side by side.
+  observedMinutes  Float?
+  observationCount Int    @default(0)
+  lastObservedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  menuItem MenuItem       @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  station  KitchenStation @relation(fields: [stationId], references: [id], onDelete: Cascade)
+
+  @@unique([menuItemId, stationId])
+  @@index([menuItemId])
+  @@index([stationId])
+}
+
+// Who can work which station, and how fast. Turns "how many people do I need?"
+// into "who should stand where?" — a 4.5-FTE grill requirement plus a 1.8-FTE
+// plating requirement does not necessarily mean 7 bodies if some of them can
+// cover both.
+model StaffStationSkill {
+  id        Int @id @default(autoincrement())
+  userId    Int
+  stationId Int
+
+  // 1–5. 0 is not used — absence of a row already means "cannot work here",
+  // so a stored 0 would be an ambiguous second way to say the same thing.
+  proficiency Int @default(3)
+
+  // Throughput multiplier vs. the standard time: 1.1 = 10% faster than the
+  // standard, 0.9 = 10% slower. Owner-entered. NOT auto-learned per employee:
+  // RunningOrder carries no per-employee attribution (nothing records which
+  // cook made which item), so a genuine per-person speed cannot be derived
+  // from this schema — see labor.learning.service.ts, which calibrates ITEM
+  // times (which the data does support) and reports per-employee shift
+  // throughput as explicitly correlational context only.
+  speedFactor Float @default(1.0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  station KitchenStation @relation(fields: [stationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, stationId])
+  @@index([userId])
+  @@index([stationId])
 }

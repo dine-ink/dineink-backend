@@ -76,4 +76,6 @@ export interface WhatIfResult {
   startDate: string;
   endDate: string;
   kpis: ProjectedKpiRow[];
+  /** The real value in effect for each override field when left blank — see runWhatIfService's own comment for the per-field fallback rules this mirrors. */
+  currentValues: Record<ScenarioOverrideField, number | null>;
 }

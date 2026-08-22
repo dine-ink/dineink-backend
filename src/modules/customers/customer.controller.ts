@@ -10,7 +10,9 @@ export const getCustomersByBranch = async (req: Request, res: Response) => {
   try {
     const restaurantId = Number(req.params.restaurantId);
     const branchId = req.query.branchId ? Number(req.query.branchId) : null;
-    const customers = await getCustomersByBranchService(restaurantId, branchId);
+    const page = req.query.page !== undefined ? Number(req.query.page) : undefined;
+    const limit = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
+    const customers = await getCustomersByBranchService(restaurantId, branchId, page, limit);
     return res.status(200).json({
       success: true,
       customers,
@@ -38,7 +40,9 @@ export const lookupCustomerByPhone = async (req: Request, res: Response) => {
 export const getCustomersByRestaurant = async (req: Request, res: Response) => {
   try {
     const restaurantId = Number(req.params.id);
-    const customers = await getCustomersByRestaurantService(restaurantId);
+    const page = req.query.page !== undefined ? Number(req.query.page) : undefined;
+    const limit = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
+    const customers = await getCustomersByRestaurantService(restaurantId, page, limit);
     return res.status(200).json({
       success: true,
       customers,
