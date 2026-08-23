@@ -222,7 +222,14 @@ export const toggleItemDoneService = async (callerRestaurantId: number, itemId: 
   }
   return prisma.runningOrderBatchItem.update({
     where: { id: itemId },
-    data: { status: done ? "DONE" : "PENDING" },
+    data: {
+      status: done ? "DONE" : "PENDING",
+      // Stamped/cleared alongside the status so the two can never disagree —
+      // a DONE row always carries when it finished, and un-ticking a mistake
+      // clears it rather than leaving a stale completion time behind. Read by
+      // the live order-ETA endpoint and by per-item calibration.
+      doneAt: done ? new Date() : null,
+    },
   });
 };
 

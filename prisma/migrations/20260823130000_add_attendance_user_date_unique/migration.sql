@@ -1,0 +1,19 @@
+-- CreateIndex
+-- Repairs schema drift, not a new design decision. schema.prisma has declared
+-- `@@unique([userId, date])` on Attendance for some time, but the constraint
+-- was never present in this database — so Prisma generated
+-- `where: { userId_date: ... }` for upsertManualAttendanceService while
+-- Postgres had no matching constraint to resolve the ON CONFLICT against.
+--
+-- The effect was that POST /api/attendance/manual failed outright with
+-- "there is no unique or exclusion constraint matching the ON CONFLICT
+-- specification" — i.e. the manual hours/overtime override has never worked
+-- against this database, from owner-web or anywhere else. Found by calling the
+-- endpoint rather than by reading, since the schema and the client both looked
+-- correct.
+--
+-- Verified safe before writing: zero duplicate (userId, date) pairs across the
+-- table, so the index builds without needing any rows merged first. Plain
+-- CREATE UNIQUE INDEX rather than CONCURRENTLY because Prisma runs migrations
+-- inside a transaction, and at this table's size the brief lock is immaterial.
+CREATE UNIQUE INDEX "Attendance_userId_date_key" ON "Attendance"("userId", "date");

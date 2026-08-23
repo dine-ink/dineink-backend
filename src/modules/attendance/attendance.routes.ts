@@ -29,10 +29,15 @@ router.get("/branch/:branchId", authMiddleware, requireOwnBranch(), getAttendanc
 // GET /api/attendance/branch/:branchId/monthly?from=YYYY-MM-DD&to=YYYY-MM-DD
 router.get("/branch/:branchId/monthly", authMiddleware, requireOwnBranch(), getMonthlyAttendance);
 
-// POST /api/attendance/manual — owner-entered total hours / overtime override
-// for one employee's one day. Body: { userId, restaurantId, branchId, date,
-// manualTotalHours?, overtimeHours?, status? }
-router.post("/manual", authMiddleware, upsertManualAttendance);
+// POST /api/attendance/manual — manager/owner-entered total hours / overtime
+// override for one employee's one day. Body: { userId, restaurantId, branchId,
+// date, manualTotalHours?, overtimeHours?, status? }
+//
+// requireRole is NOT redundant here: this route rewrites the hours a payroll
+// run pays against, so without it any authenticated session — including a
+// CASHIER's — could edit anyone's worked hours, their own included. Gated to
+// match the salary-deduction routes below, which guard the same payroll inputs.
+router.post("/manual", authMiddleware, requireRole("OWNER", "MANAGER"), upsertManualAttendance);
 
 // --- Leave management -------------------------------------------------
 // GET /api/attendance/leave/:restaurantId/:branchId?status=PENDING

@@ -18,6 +18,16 @@ export interface EquipmentInput {
   capacity?: string;
   volume?: string;
   itemCapacityCount?: number;
+  /**
+   * Sustained throughput, items/hour. Distinct from itemCapacityCount above,
+   * which is a BATCH size ("6 pizzas fit at once") and cannot yield a wait
+   * time on its own. Writable here as well as via
+   * PUT /labor/equipment/:id/station so a manager logging a unit on the POS
+   * can set its rate in the same form, rather than the rate being reachable
+   * only from the labor module. stationId is deliberately NOT accepted here —
+   * that stays the labor endpoint's job, so station wiring has one owner.
+   */
+  itemsPerHour?: number | null;
   powerConsumptionKw?: number;
   purchasePrice?: number;
   purchaseDate?: string;
@@ -45,6 +55,7 @@ export const createEquipmentService = async (
       capacity:               data.capacity,
       volume:                 data.volume,
       itemCapacityCount:      data.itemCapacityCount,
+      itemsPerHour:           data.itemsPerHour,
       powerConsumptionKw:     data.powerConsumptionKw,
       purchasePrice:          data.purchasePrice,
       purchaseDate:           data.purchaseDate ? new Date(data.purchaseDate) : undefined,
@@ -84,6 +95,7 @@ export const updateEquipmentService = async (
       capacity:               data.capacity,
       volume:                 data.volume,
       itemCapacityCount:      data.itemCapacityCount,
+      itemsPerHour:           data.itemsPerHour,
       powerConsumptionKw:     data.powerConsumptionKw,
       purchasePrice:          data.purchasePrice,
       purchaseDate:           data.purchaseDate ? new Date(data.purchaseDate) : undefined,

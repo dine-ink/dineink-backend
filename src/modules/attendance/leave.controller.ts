@@ -26,9 +26,32 @@ export const getLeaveRequests = async (req: Request, res: Response) => {
   }
 };
 
+const LEAVE_STATUSES = ["PENDING", "APPROVED", "REJECTED"] as const;
+
 export const createLeaveRequest = async (req: any, res: Response) => {
   try {
-    const { userId, branchId, leaveType, startDate, endDate, reason } = req.body;
+    const { userId, branchId, leaveType, startDate, endDate, reason, status } = req.body;
+
+    // Recording an already-settled decision is an approval, so it needs the
+    // same authority PATCH /leave/:id/status does. This route itself is only
+    // auth-gated (anyone with a login may raise a request), so without this
+    // check a CASHIER could self-approve their own leave in one call and
+    // bypass the requireRole guard on the PATCH route entirely.
+    if (status !== undefined && status !== "PENDING") {
+      if (req.user?.role !== "OWNER" && req.user?.role !== "MANAGER") {
+        return res.status(403).json({
+          success: false,
+          message: "Only an owner or manager can record an already-approved leave",
+        });
+      }
+    }
+    if (status !== undefined && !LEAVE_STATUSES.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `status must be one of ${LEAVE_STATUSES.join(", ")}`,
+      });
+    }
+
     const data = await createLeaveRequestService(Number(req.user.restaurantId), {
       userId: Number(userId),
       branchId: Number(branchId),
@@ -36,6 +59,8 @@ export const createLeaveRequest = async (req: any, res: Response) => {
       startDate,
       endDate,
       reason,
+      status,
+      decidedById: req.user?.id ? Number(req.user.id) : undefined,
     });
     return res.status(201).json({ success: true, data });
   } catch (error: any) {

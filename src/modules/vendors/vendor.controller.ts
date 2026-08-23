@@ -87,6 +87,15 @@ export const createVendorInvoice = async (req: any, res: Response) => {
       if (body.totalAmount !== undefined) body.totalAmount = Number(body.totalAmount);
       if (body.branchId !== undefined) body.branchId = Number(body.branchId);
       if (body.vendorId !== undefined) body.vendorId = Number(body.vendorId);
+      // createdById was missed by the coercion above. It reaches Prisma as a
+      // string for an Int column, so attaching a photo to an invoice that
+      // carries a creator fails the whole write — the JSON path never hit it
+      // because JSON preserves the number.
+      if (body.createdById !== undefined && body.createdById !== "") {
+        body.createdById = Number(body.createdById);
+      } else {
+        delete body.createdById;
+      }
       if (typeof body.items === "string") {
         try {
           body.items = JSON.parse(body.items);

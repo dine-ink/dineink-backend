@@ -48,6 +48,64 @@ export interface StationSummary {
   isActive: boolean;
 }
 
+// ─── Live kitchen queue (POS order-taking ETA) ────────────────────────────────
+// See labor.eta.service.ts for how each figure is derived and why the result
+// reports "not configured" rather than guessing.
+
+export interface KitchenQueueStation {
+  stationId: number;
+  code: string;
+  name: string;
+  /** Outstanding hands-on minutes already queued at this station. */
+  queueMinutes: number;
+  /** Outstanding units of food queued here — what the equipment ceiling is compared against. */
+  queueItems: number;
+  /** Clocked-in staff marked able to work this station. */
+  skilledStaffPresent: number;
+  /** Parallel workers assumed when splitting the backlog. Floors at 1. */
+  lanes: number;
+  /** Effective items/hour ceiling (station's own, else summed equipment), or null when unknown. */
+  capacityPerHour: number | null;
+  /** Backlog ÷ lanes ÷ utilization. */
+  laborWaitMinutes: number;
+  /** Backlog items ÷ throughput ceiling. 0 when no ceiling is known. */
+  equipmentWaitMinutes: number;
+  /** The binding one of the two above — the wait a new dish actually joins. */
+  waitMinutes: number;
+  /** True when the equipment ceiling, not staffing, is what's holding this station up. */
+  isEquipmentBound: boolean;
+  /** lanes × utilization. Hands-on minutes ÷ this = elapsed minutes, so the client can price a new dish onto the queue the same way the backlog was priced. */
+  productiveDivisor: number;
+}
+
+export interface KitchenQueueResult {
+  /** False = the POS must fall back to plain prepTime and quote no queue adjustment. */
+  configured: boolean;
+  /** Why it isn't configured — shown to the manager so it's actionable. */
+  reason?: string;
+  targetTicketMinutes: number;
+  openOrders: number;
+  /** False when nobody is clocked in, so every station fell back to a single lane. */
+  staffDataAvailable: boolean;
+  /** Queued units whose item has no labor standard anywhere — real work this estimate can't see. */
+  unpricedQueueItems?: number;
+  stations: KitchenQueueStation[];
+  /** menuItemId → its per-station minutes, so the client can price any item locally. */
+  standards: Record<number, { stationId: number; minutes: number }[]>;
+  /**
+   * menuItemId → MenuItem.prepTime, the whole-dish figure.
+   *
+   * Present because station splits are routinely INCOMPLETE: an item routed to
+   * 3 of 10 stations sums to a fraction of its real cook time (observed at ~58%
+   * of prepTime on average), so quoting the sum alone systematically
+   * under-promises. The client floors a dish's own cook time at this value, so
+   * an incompletely-mapped dish falls back to the time the kitchen already
+   * knows, and a fully-mapped one uses the sharper station-aware sum. Improves
+   * on its own as standards get filled in — no data migration needed.
+   */
+  wholeItemMinutes: Record<number, number>;
+}
+
 export interface LaborStandardRow {
   menuItemId: number;
   itemName: string;

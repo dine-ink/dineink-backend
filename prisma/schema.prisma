@@ -614,6 +614,17 @@ model RunningOrderBatchItem {
   status              String                       @default("PENDING")
   notes               String? // special instructions, e.g. "no onions"
   createdAt           DateTime                     @default(now())
+
+  // When the kitchen ticked this item off (status -> DONE), cleared again if
+  // it's un-ticked. Without it `status` alone says an item is PENDING or DONE
+  // but never WHEN it flipped, which blocks two things:
+  //   1. the live order-ETA endpoint, which needs to know how much of an
+  //      in-flight ticket is genuinely still outstanding rather than assuming
+  //      every un-ticked item started only when the whole order did;
+  //   2. per-item calibration, which currently has to infer from order-level
+  //      wall-clock and therefore discards any order cooked alongside more
+  //      than MAX_CONCURRENCY_FOR_CALIBRATION others (labor.formulas.ts).
+  doneAt              DateTime?
   runningOrderBatch   RunningOrderBatch            @relation(fields: [runningOrderBatchId], references: [id], onDelete: Cascade)
   addOns              RunningOrderBatchItemAddOn[]
 }

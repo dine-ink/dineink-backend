@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { getCapacitySweepService, getStaffingPlanService } from "./labor.engine.service";
 import { getCalibrationReportService } from "./labor.learning.service";
+import { getKitchenQueueService } from "./labor.eta.service";
 import {
   assignEquipmentToStationService,
   bulkUpsertLaborStandardsService,
@@ -59,6 +60,14 @@ const callerRestaurantId = (req: Request): number => {
   if (!Number.isFinite(n) || n <= 0) throw new ValidationError("Your account is not linked to a restaurant");
   return n;
 };
+
+// ─── Live kitchen queue (POS order-taking ETA) ────────────────────────────────
+
+export const getKitchenQueue = handle(async (req) => {
+  const restaurantId = validateId(req.params.restaurantId, "restaurantId");
+  const branchId = validateId(req.params.branchId, "branchId");
+  return getKitchenQueueService(restaurantId, branchId);
+});
 
 // ─── Stations ─────────────────────────────────────────────────────────────────
 

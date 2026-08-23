@@ -11,6 +11,7 @@ import {
   getCapacitySweep,
   getLaborStandards,
   getSkillMatrix,
+  getKitchenQueue,
   getStaffingPlan,
   getStations,
   seedStandardsFromPrepTime,
@@ -24,10 +25,32 @@ import { requireOwnBranch, requireOwnRestaurant, requireRole } from "../../middl
 
 const router = express.Router();
 
-// Gated to OWNER/MANAGER on top of the usual auth + tenant-ownership checks.
-// This module exposes individual salaries (via the staffing plan's labor cost),
-// per-employee capability ratings and per-employee throughput figures — the same
-// sensitivity that already gates the equipment and emi modules.
+// ─── Live kitchen queue — registered BEFORE the role gate below ───────────────
+//
+// Deliberately the one route in this module any logged-in staff member may
+// read, because the caller is a CASHIER or captain taking an order: quoting a
+// wait time is the entire point of the feature, and gating it to OWNER/MANAGER
+// would leave it unreachable by the only people who need it.
+//
+// Safe to widen because of what it returns — station names, queued minutes, a
+// skilled-present head COUNT, and item→minutes standards. No salary, no
+// per-employee row, no individual capability rating, i.e. none of the data the
+// gate below exists to protect. Still fully tenant-scoped via
+// requireOwnRestaurant/requireOwnBranch. Express applies router.use in
+// registration order, so this line must stay above it.
+router.get(
+  "/:restaurantId/:branchId/kitchen-queue",
+  authMiddleware,
+  requireOwnRestaurant(),
+  requireOwnBranch(),
+  getKitchenQueue,
+);
+
+// Everything below is gated to OWNER/MANAGER on top of the usual auth +
+// tenant-ownership checks. This module exposes individual salaries (via the
+// staffing plan's labor cost), per-employee capability ratings and per-employee
+// throughput figures — the same sensitivity that already gates the equipment
+// and emi modules.
 router.use(authMiddleware, requireRole("OWNER", "MANAGER"));
 
 // Read routes carry :restaurantId/:branchId and are gated by both middlewares.

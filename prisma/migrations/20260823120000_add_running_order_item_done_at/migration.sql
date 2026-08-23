@@ -1,0 +1,14 @@
+-- AlterTable
+-- Scoped to ONLY the new RunningOrderBatchItem.doneAt column — written by hand
+-- rather than via `prisma migrate dev` for the same reason as the two
+-- migrations before it: this environment's schema carries unrelated
+-- pre-existing drift that a generated migration would bundle in.
+--
+-- Nullable with no default and no backfill on purpose. Rows that were already
+-- DONE before this column existed have no recoverable completion time, and
+-- stamping them with the migration's own timestamp would invent history —
+-- every past item would claim it finished the moment this deployed, which the
+-- calibration pass would then read as real evidence. NULL correctly means "we
+-- don't know when this finished", and the ETA endpoint only ever reads doneAt
+-- for currently-open orders, which are all stamped going forward.
+ALTER TABLE "RunningOrderBatchItem" ADD COLUMN "doneAt" TIMESTAMP(3);
