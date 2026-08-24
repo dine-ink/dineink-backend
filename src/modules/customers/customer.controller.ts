@@ -42,7 +42,16 @@ export const getCustomersByRestaurant = async (req: Request, res: Response) => {
     const restaurantId = Number(req.params.id);
     const page = req.query.page !== undefined ? Number(req.query.page) : undefined;
     const limit = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
-    const customers = await getCustomersByRestaurantService(restaurantId, page, limit);
+    // ?includeBills=false for callers that only need the per-customer summary
+    // (visits/spend/lastVisit) and not the bill history — the bulk-send
+    // audience list, for one, which pulls thousands of rows.
+    const includeBills = req.query.includeBills !== "false";
+    const customers = await getCustomersByRestaurantService(
+      restaurantId,
+      page,
+      limit,
+      { includeBills },
+    );
     return res.status(200).json({
       success: true,
       customers,

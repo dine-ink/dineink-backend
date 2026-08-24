@@ -1,5 +1,7 @@
 import express from "express";
 
+import compression from "compression";
+
 import cors from "cors";
 
 import path from "path";
@@ -14,6 +16,13 @@ app.use(cors({
   },
   credentials: true,
 }));
+
+// Analytics and report responses are large, highly repetitive JSON and were
+// being sent uncompressed across the Singapore→India hop. gzip typically takes
+// 80–90% off those payloads. Registered before the routes so every JSON
+// response is covered; `threshold` skips the tiny ones where the CPU cost of
+// compressing outweighs the saving.
+app.use(compression({ threshold: 1024 }));
 
 app.use(express.json());
 
