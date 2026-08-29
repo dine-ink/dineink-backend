@@ -45,6 +45,45 @@ export const sendPasswordResetOtpEmail = (to: string, otp: string) =>
     body: "Use the code below to reset your DineInk account password.",
   });
 
+/**
+ * Password reset for a DineInk employee on the internal console.
+ *
+ * A single-use link rather than the 6-digit OTP the restaurant apps use: an
+ * internal account can suspend restaurants and change permissions, so its reset
+ * factor is a 256-bit token that can't be brute-forced in the way a six-digit
+ * code can, and only its SHA-256 hash is ever stored.
+ */
+export const sendInternalPasswordResetEmail = async (
+  to: string,
+  name: string,
+  resetUrl: string,
+  expiresInMinutes: number,
+) => {
+  if (!process.env.SENDGRID_API_KEY || !process.env.SENDGRID_FROM_EMAIL) {
+    throw new Error("Email service is not configured");
+  }
+
+  await sgMail.send({
+    to,
+    from: process.env.SENDGRID_FROM_EMAIL,
+    subject: "Reset your DineInk internal password",
+    text:
+      `Hi ${name},\n\nUse this link to set a new password for the DineInk internal console:\n${resetUrl}\n\n` +
+      `The link expires in ${expiresInMinutes} minutes and can only be used once. ` +
+      `If you didn't request it, ignore this email — your password stays unchanged.`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
+        <h2 style="color:#b10000; margin-bottom: 8px;">Reset your password</h2>
+        <p style="color:#333; font-size: 14px;">Hi ${name}, use the button below to set a new password for the DineInk internal console.</p>
+        <p style="margin: 24px 0;">
+          <a href="${resetUrl}" style="background:#b10000; color:#fff; text-decoration:none; padding:12px 20px; border-radius:8px; font-size:14px; font-weight:bold; display:inline-block;">Set a new password</a>
+        </p>
+        <p style="color:#78716c; font-size: 12px;">This link expires in ${expiresInMinutes} minutes and can only be used once. If you didn't request it, ignore this email — your password stays unchanged.</p>
+      </div>
+    `,
+  });
+};
+
 // Generic free-text email — used by Vendor Intelligence's "reorder via
 // email" action to send a plain reorder request to a vendor. Unlike
 // sendCodeEmail above this carries no OTP, just a subject/body the caller

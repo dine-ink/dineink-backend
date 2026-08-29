@@ -34,6 +34,7 @@ import complianceRoutes from "../modules/compliance/compliance.routes";
 import whatsappRoutes from "../modules/whatsapp/whatsapp.routes";
 import cashflowRoutes from "../modules/cashflow/cashflow.routes";
 import bankingRoutes from "../modules/banking/banking.routes";
+import internalRoutes from "../modules/internal/internal.routes";
 
 const router = express.Router();
 
@@ -72,5 +73,10 @@ router.use("/compliance", complianceRoutes);
 router.use("/whatsapp", whatsappRoutes);
 router.use("/cashflow", cashflowRoutes);
 router.use("/banking", bankingRoutes);
+
+// DineInk internal operations console. Separate authentication, separate
+// authorization (permission-based, not restaurant-scoped) — see
+// modules/internal/internal.routes.ts.
+router.use("/internal", internalRoutes);
 
 export default router;
