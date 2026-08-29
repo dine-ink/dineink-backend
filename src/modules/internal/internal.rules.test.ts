@@ -5,7 +5,8 @@ import { assertTicketTransition } from "./tickets/tickets.service";
 import { deriveTransactionStatus } from "./transactions/transactions.service";
 import { applyContactMasking, maskEmail, maskPhone } from "./shared/pii";
 import { base32Decode, base32Encode, generateSecret, generateTotp, verifyTotp } from "./auth/totp";
-import { ApiError } from "./shared/apiError";
+import { ApiError, toInt32 } from "./shared/apiError";
+import { accumulateSignups } from "./analytics/analytics.service";
 
 /**
  * These cover the rules that decide who can do what and what a number means —
@@ -267,5 +268,63 @@ describe("TOTP", () => {
     const now = Date.now();
     const code = generateTotp(generateSecret(), now);
     expect(verifyTotp(generateSecret(), code, now)).toBe(false);
+  });
+});
+
+describe("application log capture", () => {
+  /**
+   * Regression: the id parsed out of the URL used to be passed to Prisma raw.
+   * `/restaurants/99999999999999999999` became 1e20, which overflows int4 and
+   * made the write recording the error fail — so the only errors that went
+   * unrecorded were the ones caused by absurd input, which is exactly the class
+   * worth seeing.
+   */
+  it("drops ids that would overflow the column rather than losing the log line", () => {
+    expect(toInt32("99999999999999999999")).toBeNull();
+    expect(toInt32("2147483648")).toBeNull();
+    expect(toInt32("2147483647")).toBe(2_147_483_647);
+    expect(toInt32("248")).toBe(248);
+  });
+
+  it("treats a missing or unusable segment as no id", () => {
+    expect(toInt32(undefined)).toBeNull();
+    expect(toInt32("")).toBeNull();
+    expect(toInt32("0")).toBeNull();
+    expect(toInt32("abc")).toBeNull();
+  });
+});
+
+describe("account growth series", () => {
+  const day = (n: number) => new Date(Date.UTC(2026, 0, n));
+
+  /**
+   * Regression: the chart is titled "accounts over time" and was being fed the
+   * day's intake. A quiet Tuesday after a busy Monday drew a downward slope,
+   * which reads as accounts leaving the platform — they never do; churn is a
+   * status change, not a deletion.
+   */
+  it("never falls, whatever the daily intake looks like", () => {
+    const series = accumulateSignups(
+      [
+        { day: day(1), count: 4n },
+        { day: day(2), count: 1n },
+        { day: day(3), count: 0n },
+        { day: day(4), count: 7n },
+      ],
+      0,
+    );
+    expect(series.map((point) => point.count)).toEqual([4, 5, 5, 12]);
+    for (let i = 1; i < series.length; i += 1) {
+      expect(series[i].count).toBeGreaterThanOrEqual(series[i - 1].count);
+    }
+  });
+
+  it("starts from the accounts that already existed before the range", () => {
+    const series = accumulateSignups([{ day: day(1), count: 2n }], 100);
+    expect(series[0].count).toBe(102);
+  });
+
+  it("returns nothing for a range with no sign-ups", () => {
+    expect(accumulateSignups([], 6)).toEqual([]);
   });
 });
