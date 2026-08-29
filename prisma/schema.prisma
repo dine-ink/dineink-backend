@@ -72,7 +72,36 @@ model Restaurant {
   bankTransactionEntries   BankTransactionEntry[]
   kitchenStations          KitchenStation[]
 
+  // ─── Platform lifecycle (Dine Inc. internal operations) ───────────────────
+  // Until now a Restaurant row existed the moment an owner signed up and there
+  // was no notion of where it sat in Dine Inc.'s own funnel — a half-configured
+  // signup and a live, trading restaurant were indistinguishable. These columns
+  // are what the internal app manages; the restaurant-facing apps never write
+  // them. All nullable/defaulted so every existing row stays valid.
+  platformStatus   RestaurantPlatformStatus   @default(ONBOARDING)
+  onboardingStage  RestaurantOnboardingStage  @default(LEAD)
+  // Location on the restaurant itself. Branch already carries city/state, but a
+  // restaurant is listed and filtered by location before any branch exists
+  // (a lead has no branch yet), so it needs its own.
+  city             String?
+  state            String?
+  pincode          String?
+  cuisine          String?
+  // Set by the internal app when a restaurant is activated/suspended, alongside
+  // the audit record — kept here so list queries can sort/filter without
+  // joining the audit log. lastActivityAt is refreshed from order/bill activity.
+  activatedAt      DateTime?
+  suspendedAt      DateTime?
+  suspensionReason String?
+  lastActivityAt   DateTime?
+  // Free-text internal context (account manager notes, pilot cohort, etc.).
+  internalNotes    String?
+
+  onboardingTasks RestaurantOnboardingTask[]
+
   @@index([ownerId])
+  @@index([platformStatus])
+  @@index([onboardingStage])
 }
 
 model Branch {
@@ -525,6 +554,16 @@ model RestaurantTable {
   runningOrders RunningOrder[]
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
+
+  // ─── Table QR ─────────────────────────────────────────────────────────────
+  // The QR a guest scans must not encode the table's primary key: sequential
+  // ids are trivially enumerable, so anyone could forge a scan for any table in
+  // any restaurant by counting upward. qrToken is an unguessable random
+  // identifier minted server-side; regenerating one issues a fresh token and
+  // invalidates every printed copy of the old one.
+  qrToken       String?   @unique
+  qrEnabled     Boolean   @default(false)
+  qrGeneratedAt DateTime?
 
   @@index([branchId])
   @@index([restaurantId])
@@ -2136,4 +2175,419 @@ model StaffStationSkill {
   @@unique([userId, stationId])
   @@index([userId])
   @@index([stationId])
+}
+
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// DINE INC. INTERNAL OPERATIONS PLATFORM
+//
+// Everything below backs the internal employee application, not the
+// restaurant-facing apps. Two rules hold throughout:
+//
+//   1. Internal employees are a DIFFERENT ACTOR from `User`. `User` is
+//      restaurant-scoped (it carries restaurantId/branchId, and loginUser lets
+//      any User row into owner-web and the POS). Putting Dine Inc. staff there
+//      would hand them a restaurant login and break every tenant guard in
+//      middleware/authorize.ts. Hence InternalUser, with its own auth surface.
+//
+//   2. Nothing here duplicates a business entity. Restaurants, customers,
+//      orders/bills and menus stay in the models above and are read through the
+//      existing services; the tables below only add what the platform itself
+//      owns â€” identity, permissions, audit, support and onboarding state.
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+enum RestaurantPlatformStatus {
+  LEAD
+  ONBOARDING
+  ACTIVE
+  SUSPENDED
+  CHURNED
+}
+
+enum RestaurantOnboardingStage {
+  LEAD
+  INTERESTED
+  ONBOARDING
+  VERIFICATION
+  CONFIGURATION
+  TESTING
+  READY
+  ACTIVE
+}
+
+enum InternalUserStatus {
+  INVITED
+  ACTIVE
+  DISABLED
+}
+
+// â”€â”€â”€ Identity & RBAC â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+model InternalUser {
+  id           Int                @id @default(autoincrement())
+  employeeCode String             @unique // EMP-0001 â€” the id shown in the UI
+  name         String
+  email        String             @unique // company email; the login identifier
+  password     String
+  phone        String?
+  department   String?
+  designation  String?
+  status       InternalUserStatus @default(ACTIVE)
+
+  // Privileged roles can be required to enrol in 2FA; the flag is stored per
+  // user so the requirement can be tightened for one person without a schema
+  // change. The secret is only populated once enrolment completes.
+  twoFactorEnabled  Boolean @default(false)
+  twoFactorRequired Boolean @default(false)
+  twoFactorSecret   String?
+
+  // Login-attempt protection. The backend has no rate limiter of any kind, so
+  // lockout state lives here rather than in memory â€” a restart must not reset
+  // an attacker's budget, and the API runs more than one instance.
+  failedLoginCount Int       @default(0)
+  lockedUntil      DateTime?
+  lastLoginAt      DateTime?
+  lastLoginIp      String?
+
+  mustChangePassword Boolean @default(true)
+
+  createdById Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  roles               InternalUserRole[]
+  sessions            InternalSession[]
+  passwordResets      InternalPasswordResetToken[]
+  ticketsCreated      SupportTicket[]              @relation("TicketCreatedBy")
+  ticketsAssigned     SupportTicket[]              @relation("TicketAssignedTo")
+  ticketComments      SupportTicketComment[]
+  ticketEvents        SupportTicketEvent[]
+  onboardingTasksDone RestaurantOnboardingTask[]
+
+  @@index([status])
+  @@index([department])
+}
+
+// A named bundle of permissions. `key` is the stable identifier code refers to
+// (SUPER_ADMIN, OPERATIONS_ADMIN, â€¦); `name` is editable copy. isSystem marks
+// the seeded roles â€” they can be granted/revoked permissions by an authorized
+// admin but never deleted, so an install can't lock itself out.
+model InternalRole {
+  id          Int     @id @default(autoincrement())
+  key         String  @unique
+  name        String
+  description String?
+  isSystem    Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  permissions InternalRolePermission[]
+  users       InternalUserRole[]
+}
+
+// Permission keys are defined in code (modules/internal/rbac/permissions.ts) â€”
+// that catalog is the source of truth, so a typo can't silently create a
+// permission nothing checks. This table only records which role holds which.
+model InternalRolePermission {
+  id         Int    @id @default(autoincrement())
+  roleId     Int
+  permission String
+
+  role InternalRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permission])
+  @@index([permission])
+}
+
+model InternalUserRole {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  roleId      Int
+  grantedById Int?
+  createdAt   DateTime @default(now())
+
+  user InternalUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role InternalRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([roleId])
+}
+
+// One row per issued access token. The restaurant apps use bare stateless JWTs,
+// which cannot be revoked before they expire â€” unacceptable for a console that
+// can suspend restaurants and approve refunds. Every internal token carries a
+// jti matched against this table on each request, so "log out everywhere",
+// disabling an employee, or a role change can cut access immediately.
+model InternalSession {
+  id            Int       @id @default(autoincrement())
+  userId        Int
+  tokenId       String    @unique
+  ip            String?
+  userAgent     String?
+  createdAt     DateTime  @default(now())
+  lastSeenAt    DateTime  @default(now())
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  revokedReason String?
+
+  user InternalUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model InternalPasswordResetToken {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  tokenHash String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user InternalUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// Deliberately keyed by email rather than user id: attempts against an address
+// that doesn't exist must be counted too, otherwise enumeration is free.
+model InternalLoginAttempt {
+  id        Int      @id @default(autoincrement())
+  email     String
+  ip        String?
+  success   Boolean
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([createdAt])
+}
+
+// â”€â”€â”€ Audit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+// Append-only from the application's point of view: the internal API exposes
+// create + read and no update/delete path whatsoever. actorEmail is denormalized
+// so a log line still names who acted after the employee record is gone, and
+// resourceId is a plain string (not an FK) so an audit row outlives the row it
+// describes.
+model InternalAuditLog {
+  id            Int      @id @default(autoincrement())
+  actorId       Int?
+  actorEmail    String?
+  actorName     String?
+  action        String // RESTAURANT_SUSPEND, ROLE_PERMISSIONS_UPDATE, â€¦
+  resourceType  String // Restaurant, InternalUser, SupportTicket, â€¦
+  resourceId    String?
+  resourceLabel String?
+  previousValue Json?
+  newValue      Json?
+  reason        String?
+  ip            String?
+  userAgent     String?
+  correlationId String?
+  createdAt     DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([resourceType, resourceId])
+  @@index([action, createdAt])
+  @@index([createdAt])
+}
+
+// â”€â”€â”€ Restaurant onboarding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+enum OnboardingTaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETE
+  BLOCKED
+  NOT_APPLICABLE
+}
+
+// The checklist a restaurant must clear before it can be activated. Rows are
+// materialized per restaurant from a code-defined template so the template can
+// gain a step without rewriting history: restaurants already onboarded keep the
+// checklist they were actually held to.
+model RestaurantOnboardingTask {
+  id            Int                  @id @default(autoincrement())
+  restaurantId  Int
+  key           String
+  label         String
+  category      String
+  isMandatory   Boolean              @default(true)
+  status        OnboardingTaskStatus @default(PENDING)
+  notes         String?
+  sortOrder     Int                  @default(0)
+  completedAt   DateTime?
+  completedById Int?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  restaurant  Restaurant    @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  completedBy InternalUser? @relation(fields: [completedById], references: [id])
+
+  @@unique([restaurantId, key])
+  @@index([restaurantId, status])
+}
+
+// â”€â”€â”€ Support tickets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+enum TicketCategory {
+  PAYMENT
+  ORDER
+  RESTAURANT
+  CUSTOMER
+  LOGIN
+  QR
+  MENU
+  ACCOUNT
+  TECHNICAL
+  OTHER
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum TicketStatus {
+  NEW
+  TRIAGED
+  IN_PROGRESS
+  WAITING_FOR_INFORMATION
+  ESCALATED_TO_ENGINEERING
+  ENGINEERING_RESOLVED
+  VERIFICATION
+  RESOLVED
+  CLOSED
+}
+
+model SupportTicket {
+  id          Int            @id @default(autoincrement())
+  ticketNo    String         @unique // DINE-1024
+  title       String
+  description String
+  category    TicketCategory
+  priority    TicketPriority @default(MEDIUM)
+  status      TicketStatus   @default(NEW)
+
+  createdById  Int
+  assignedToId Int?
+
+  // Linked entities are scalar ids, not foreign keys, on purpose: a ticket is a
+  // record of what someone reported and must survive the order, customer or
+  // restaurant it referenced being removed. Every read of a linked record goes
+  // back through the internal API and is re-checked against the caller's
+  // permissions â€” the link itself grants nothing.
+  restaurantId   Int?
+  customerId     Int?
+  billId         Int?
+  runningOrderId Int?
+
+  // Technical context captured at escalation time and forwarded to Jira.
+  errorCode     String?
+  correlationId String?
+  environment   String?
+
+  jiraIssueKey String?
+  jiraIssueUrl String?
+  jiraStatus   String?
+  jiraSyncedAt DateTime?
+
+  escalatedAt DateTime?
+  resolvedAt  DateTime?
+  closedAt    DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  createdBy   InternalUser              @relation("TicketCreatedBy", fields: [createdById], references: [id])
+  assignedTo  InternalUser?             @relation("TicketAssignedTo", fields: [assignedToId], references: [id])
+  comments    SupportTicketComment[]
+  events      SupportTicketEvent[]
+  attachments SupportTicketAttachment[]
+
+  @@index([status, priority])
+  @@index([restaurantId])
+  @@index([assignedToId])
+  @@index([createdAt])
+}
+
+model SupportTicketComment {
+  id        Int      @id @default(autoincrement())
+  ticketId  Int
+  authorId  Int
+  body      String
+  createdAt DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author InternalUser  @relation(fields: [authorId], references: [id])
+
+  @@index([ticketId])
+}
+
+// The ticket's timeline â€” status changes, assignment, escalation, Jira sync.
+// Separate from comments so the narrative and the state history don't have to
+// be untangled from one another when rendering the detail page.
+model SupportTicketEvent {
+  id        Int      @id @default(autoincrement())
+  ticketId  Int
+  actorId   Int?
+  type      String // STATUS_CHANGED, ASSIGNED, ESCALATED, JIRA_LINKED, â€¦
+  fromValue String?
+  toValue   String?
+  message   String?
+  createdAt DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  actor  InternalUser? @relation(fields: [actorId], references: [id])
+
+  @@index([ticketId, createdAt])
+}
+
+model SupportTicketAttachment {
+  id           Int      @id @default(autoincrement())
+  ticketId     Int
+  fileName     String
+  filePath     String
+  mimeType     String?
+  size         Int?
+  uploadedById Int?
+  createdAt    DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+}
+
+// â”€â”€â”€ Platform configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+// Company/business/payment/security settings, one row per key, grouped for the
+// settings UI. Values are Json so a setting can be a scalar or a small object
+// without a migration per setting. The commission rate lives here rather than
+// being hard-coded â€” Dine Inc.'s revenue model is not represented anywhere in
+// the restaurant schema, and inventing a rate in code would silently fabricate
+// every revenue figure the dashboard shows.
+model PlatformSetting {
+  id          Int      @id @default(autoincrement())
+  key         String   @unique
+  group       String
+  value       Json
+  description String?
+  updatedById Int?
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@index([group])
+}
+
+model FeatureFlag {
+  id          Int      @id @default(autoincrement())
+  key         String   @unique
+  name        String
+  description String?
+  isEnabled   Boolean  @default(false)
+  updatedById Int?
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
 }
