@@ -1,4 +1,5 @@
 import { Router } from "express";
+import analyticsRoutes from "./analytics/analytics.routes";
 import auditRoutes from "./audit/audit.routes";
 import authRoutes from "./auth/internalAuth.routes";
 import customerRoutes from "./customers/customers.routes";
@@ -42,6 +43,9 @@ router.use("/employees", employeeRoutes);
 router.use("/roles", roleRoutes);
 router.use("/audit-logs", auditRoutes);
 router.use("/settings", settingsRoutes);
+
+// Analytics, reports, system health and application logs.
+router.use("/", analyticsRoutes);
 
 // Dashboard, global search and the engineering queue live at the top level.
 router.use("/", dashboardRoutes);

@@ -78,8 +78,14 @@ model Restaurant {
   // signup and a live, trading restaurant were indistinguishable. These columns
   // are what the internal app manages; the restaurant-facing apps never write
   // them. All nullable/defaulted so every existing row stays valid.
-  platformStatus   RestaurantPlatformStatus   @default(ONBOARDING)
-  onboardingStage  RestaurantOnboardingStage  @default(LEAD)
+  // Defaults describe a restaurant that signed up through owner-web: an
+  // account exists, so by definition they are past onboarding. Onboarding
+  // means "we are still talking to them and they have no account yet" — a
+  // state only reachable by creating a lead in the internal console, which
+  // sets LEAD explicitly. Order volume is irrelevant to either: a live
+  // account with no orders yet is still a live account.
+  platformStatus   RestaurantPlatformStatus   @default(ACTIVE)
+  onboardingStage  RestaurantOnboardingStage  @default(ACTIVE)
   // Location on the restaurant itself. Branch already carries city/state, but a
   // restaurant is listed and filtered by location before any branch exists
   // (a lead has no branch yet), so it needs its own.
@@ -2590,4 +2596,43 @@ model FeatureFlag {
   updatedById Int?
   updatedAt   DateTime @updatedAt
   createdAt   DateTime @default(now())
+}
+
+/// Persisted application errors, so the correlation id the API hands an
+/// employee actually resolves to something.
+///
+/// Until now every unexpected failure was console.error'd to stdout — captured
+/// by the host, invisible to the console, and unsearchable. The error response
+/// tells the employee to "quote this reference", so the reference has to lead
+/// somewhere. This is that somewhere.
+///
+/// Deliberately errors only, not a general request log: logging every request
+/// would put a write on the hot path and fill the table with noise. Stack
+/// traces are stored because this table is only readable with LOG_VIEW, and a
+/// stack is the whole point of an engineer opening it.
+model ApplicationLog {
+  id            Int      @id @default(autoincrement())
+  correlationId String
+  level         String   @default("ERROR")
+  service       String   @default("internal-api")
+  method        String?
+  path          String?
+  statusCode    Int?
+  message       String
+  stack         String?
+  /// Set when the failure happened inside an authenticated internal request.
+  actorId       Int?
+  actorEmail    String?
+  /// Entity ids parsed from the route, so a log line can be found by the order
+  /// or restaurant it concerned rather than only by its correlation id.
+  restaurantId  Int?
+  orderId       Int?
+  ip            String?
+  userAgent     String?
+  createdAt     DateTime @default(now())
+
+  @@index([correlationId])
+  @@index([createdAt])
+  @@index([level, createdAt])
+  @@index([restaurantId])
 }

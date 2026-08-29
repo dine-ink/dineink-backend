@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import prisma from "../../../config/prisma";
 
 /**
  * Errors the internal application shows to employees.
@@ -72,10 +73,69 @@ export const internalErrorHandler = (err: any, req: any, res: any, next: any) =>
     `[internal-api] ${correlationId} ${req.method} ${req.originalUrl} actor=${req.internal?.email ?? "anonymous"}`,
     err,
   );
+
+  // Persist it so the reference the employee is told to quote actually leads
+  // somewhere. Fire-and-forget and swallowed: a failure to record the error
+  // must never replace the error the caller is already getting.
+  void persistApplicationLog(req, err, correlationId);
   return res.status(500).json({
     success: false,
     code: "INTERNAL_ERROR",
     message: "Something went wrong on our side. Quote this reference if you report it.",
     correlationId,
   });
+};
+
+/**
+ * A route segment as an id the Int column can actually hold, or null.
+ *
+ * `/restaurants/99999999999999999999` parses to 1e20, which overflows int4 and
+ * makes the *write itself* fail — so the one error worth recording is the one
+ * that gets silently dropped. Anything out of range is recorded as no id: the
+ * failure still lands, just without a context link it never had.
+ */
+export const toInt32 = (raw: string | undefined): number | null => {
+  if (!raw) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647 ? value : null;
+};
+
+/**
+ * Writes one unexpected failure to ApplicationLog.
+ *
+ * Ids are parsed out of the route so an engineer can search by the order or
+ * restaurant a failure concerned, not only by its correlation id — "every error
+ * touching RES-248 this week" is the question that actually gets asked.
+ */
+const persistApplicationLog = async (req: any, err: any, correlationId: string) => {
+  try {
+    const url: string = req.originalUrl ?? "";
+    const restaurantMatch = url.match(/\/restaurants\/(\d+)/);
+    const orderMatch = url.match(/\/(?:orders|transactions)\/(\d+)/);
+
+    await prisma.applicationLog.create({
+      data: {
+        correlationId,
+        level: "ERROR",
+        service: "internal-api",
+        method: req.method ?? null,
+        // Query strings can carry a search term with someone's phone number in
+        // it; the path alone is what makes a log line useful.
+        path: url.split("?")[0] || null,
+        statusCode: 500,
+        message: String(err?.message ?? err).slice(0, 2000),
+        stack: typeof err?.stack === "string" ? err.stack.slice(0, 8000) : null,
+        actorId: req.internal?.id ?? null,
+        actorEmail: req.internal?.email ?? null,
+        restaurantId: toInt32(restaurantMatch?.[1]),
+        orderId: toInt32(orderMatch?.[1]),
+        ip: (typeof req.headers?.["x-forwarded-for"] === "string"
+          ? req.headers["x-forwarded-for"].split(",")[0].trim()
+          : req.ip) ?? null,
+        userAgent: (req.headers?.["user-agent"] as string | undefined) ?? null,
+      },
+    });
+  } catch (writeError) {
+    console.error("[internal-api] could not persist application log", writeError);
+  }
 };
