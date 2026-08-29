@@ -27,7 +27,24 @@ const caPath = process.env.DATABASE_CA_CERT;
 const caInline = process.env.DATABASE_CA_CERT_PEM;
 const ca = caInline ?? (caPath && fs.existsSync(caPath) ? fs.readFileSync(caPath, "utf8") : undefined);
 
-if (!ca) {
+/**
+ * TLS is always on unless a developer explicitly turns it off.
+ *
+ * A local Postgres — the one in a Docker container, or a plain `brew install`
+ * — doesn't offer SSL at all, and pg fails the connection outright rather than
+ * falling back. Without an opt-out there is no way to run this backend against
+ * a local database, which is why every developer ends up pointed at a shared
+ * remote one.
+ *
+ * Deliberately an explicit env var rather than "off when the host looks local":
+ * a hostname check would silently disable TLS for anything tunnelled or
+ * port-forwarded to localhost, which is exactly when you still want it.
+ */
+const sslDisabled = process.env.DATABASE_SSL === "disable";
+
+if (sslDisabled) {
+  console.warn("[db] DATABASE_SSL=disable — connecting to Postgres WITHOUT TLS. Never do this outside local development.");
+} else if (!ca) {
   console.warn(
     "[db] No DATABASE_CA_CERT set — the TLS connection to Postgres is encrypted but the server certificate is NOT verified.",
   );
@@ -38,7 +55,7 @@ const pool = new Pool({
   max: 40,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,
-  ssl: ca ? { ca, rejectUnauthorized: true } : { rejectUnauthorized: false },
+  ssl: sslDisabled ? false : ca ? { ca, rejectUnauthorized: true } : { rejectUnauthorized: false },
 });
 const adapter = new PrismaPg(pool);
 
