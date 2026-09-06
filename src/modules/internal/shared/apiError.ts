@@ -1,59 +1,32 @@
-import crypto from "crypto";
 import prisma from "../../../config/prisma";
+import { ApiError, newCorrelationId, toInt32 } from "../../../shared/apiError";
 
 /**
- * Errors the internal application shows to employees.
+ * The internal console's error handling.
  *
- * The brief is explicit that employees must never see a stack trace, and that
- * errors should be actionable and traceable. So: every failure carries a stable
- * `code` the frontend can branch on, a sentence written for a person, and — for
- * anything unexpected — a short correlation id that is printed in the server log
- * next to the real error. An employee can quote that id in a ticket without the
- * response ever having leaked internals.
+ * The error *type* and its factories now live in `src/shared/apiError` and are
+ * used by the whole API — they were only ever internal-specific by accident of
+ * where they were first written. What stays here is the one piece that really
+ * is internal-only: an error handler that also writes the failure to
+ * `ApplicationLog`, so the reference an employee is told to quote leads
+ * somewhere an engineer can search.
+ *
+ * Re-exported below rather than moved outright, so the ~39 files already
+ * importing from this path keep working.
  */
-export class ApiError extends Error {
-  status: number;
-  code: string;
-  details?: unknown;
-
-  constructor(status: number, code: string, message: string, details?: unknown) {
-    super(message);
-    this.name = "ApiError";
-    this.status = status;
-    this.code = code;
-    this.details = details;
-  }
-}
-
-export const badRequest = (message: string, code = "BAD_REQUEST", details?: unknown) =>
-  new ApiError(400, code, message, details);
-
-export const notFound = (message: string, code = "NOT_FOUND") => new ApiError(404, code, message);
-
-export const forbidden = (message: string, code = "PERMISSION_DENIED") => new ApiError(403, code, message);
-
-export const conflict = (message: string, code = "CONFLICT") => new ApiError(409, code, message);
-
-/** A request that is well-formed but not allowed by a business rule. */
-export const invalidState = (message: string, code = "INVALID_STATE", details?: unknown) =>
-  new ApiError(422, code, message, details);
-
-export const serviceUnavailable = (message: string, code = "SERVICE_UNAVAILABLE") =>
-  new ApiError(503, code, message);
-
-export const tooManyRequests = (message: string, code = "TOO_MANY_REQUESTS") =>
-  new ApiError(429, code, message);
-
-/**
- * Wraps an async route handler so a rejected promise reaches the error
- * middleware. Express 5 forwards rejections from async handlers on its own, but
- * being explicit keeps the behaviour independent of that.
- */
-export const asyncHandler =
-  (handler: (req: any, res: any, next: any) => Promise<unknown>) =>
-  (req: any, res: any, next: any) => {
-    Promise.resolve(handler(req, res, next)).catch(next);
-  };
+export {
+  ApiError,
+  asyncHandler,
+  badRequest,
+  conflict,
+  forbidden,
+  invalidState,
+  notFound,
+  serviceUnavailable,
+  tooManyRequests,
+  unauthorized,
+  toInt32,
+} from "../../../shared/apiError";
 
 export const internalErrorHandler = (err: any, req: any, res: any, next: any) => {
   if (res.headersSent) return next(err);
@@ -68,7 +41,7 @@ export const internalErrorHandler = (err: any, req: any, res: any, next: any) =>
   }
 
   // Prisma's own errors carry query text and column names — never forwarded.
-  const correlationId = crypto.randomBytes(6).toString("hex");
+  const correlationId = newCorrelationId();
   console.error(
     `[internal-api] ${correlationId} ${req.method} ${req.originalUrl} actor=${req.internal?.email ?? "anonymous"}`,
     err,
@@ -84,20 +57,6 @@ export const internalErrorHandler = (err: any, req: any, res: any, next: any) =>
     message: "Something went wrong on our side. Quote this reference if you report it.",
     correlationId,
   });
-};
-
-/**
- * A route segment as an id the Int column can actually hold, or null.
- *
- * `/restaurants/99999999999999999999` parses to 1e20, which overflows int4 and
- * makes the *write itself* fail — so the one error worth recording is the one
- * that gets silently dropped. Anything out of range is recorded as no id: the
- * failure still lands, just without a context link it never had.
- */
-export const toInt32 = (raw: string | undefined): number | null => {
-  if (!raw) return null;
-  const value = Number(raw);
-  return Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647 ? value : null;
 };
 
 /**
