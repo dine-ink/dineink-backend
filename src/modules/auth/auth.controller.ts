@@ -1,4 +1,5 @@
-import { Request, Response } from "express";
+import { NextFunction, Request, Response } from "express";
+import { ApiError } from "../../shared/apiError";
 import {
   changePasswordService,
   loginUser,
@@ -10,10 +11,15 @@ import {
   verifyManagerOverride,
 } from "./auth.service";
 
-export const login = async (req: Request, res: Response) => {
+export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { identifier, password } = req.body;
-    const data = await loginUser(identifier, password);
+    const data = await loginUser(identifier, password, {
+      // `trust proxy` is set in index.ts, so req.ip is the caller's address
+      // rather than the load balancer's.
+      ip: req.ip,
+      userAgent: req.get("user-agent") ?? undefined,
+    });
     return res.status(200).json({
       success: true,
       message: "Login successful",
@@ -23,6 +29,11 @@ export const login = async (req: Request, res: Response) => {
       branches: data.branches,
     });
   } catch (error: any) {
+    // The lockout is an ApiError carrying its own 429 and an ACCOUNT_LOCKED
+    // code the frontends branch on to show the reset prompt. Forward it to the
+    // shared handler rather than flattening every failure to a bare 400, which
+    // is what the rest of this module still does.
+    if (error instanceof ApiError) return next(error);
     return res.status(400).json({
       success: false,
       message: error.message,
@@ -62,6 +73,14 @@ export const sendSignupOtpHandler = async (req: Request, res: Response) => {
       message: "Verification code sent",
     });
   } catch (error: any) {
+    // SendGrid puts the actual reason (unverified sender, key missing the
+    // mail.send scope, suppressed recipient) in response.body.errors — the
+    // top-level message is just "Forbidden", which says nothing useful. Log
+    // the detail server-side; the client still gets the short message.
+    console.error(
+      "[auth] signup OTP send failed:",
+      error?.response?.body ?? error,
+    );
     return res.status(400).json({
       success: false,
       message: error.message,
