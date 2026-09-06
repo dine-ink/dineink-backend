@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { internalAuth, requirePermission } from "../rbac/internalAuth.middleware";
+import { requireRestaurantAccess } from "../rbac/scope";
 import { PERMISSIONS as P } from "../rbac/permissions";
 import * as c from "./restaurants.controller";
 
@@ -13,9 +14,20 @@ const router = Router();
 router.use(internalAuth);
 
 // List & detail
+//
+// The collection routes come first, and deliberately so: `/:id` is registered
+// below as middleware, and Express matches in declaration order — mounted
+// above, it would capture "filter-options" as an id, fail to parse it as a
+// number, and 404 a route that exists.
 router.get("/", requirePermission(P.RESTAURANT_VIEW), c.list);
 router.get("/filter-options", requirePermission(P.RESTAURANT_VIEW), c.filterOptions);
 router.post("/", requirePermission(P.RESTAURANT_CREATE), c.create);
+
+// A restaurant is reached through the account that owns it, so every by-id
+// route below is scoped the same way the account routes are. One `use` rather
+// than the guard repeated on twenty routes — a route added later is covered by
+// default, which is the safe direction for a scope check to fail.
+router.use("/:id", requireRestaurantAccess("id"));
 router.get("/:id", requirePermission(P.RESTAURANT_VIEW), c.detail);
 router.patch("/:id", requirePermission(P.RESTAURANT_EDIT), c.update);
 router.get("/:id/activity", requirePermission(P.RESTAURANT_VIEW), c.activity);
@@ -27,10 +39,9 @@ router.get("/:id/financial", requirePermission(P.RESTAURANT_FINANCIAL_VIEW), c.f
 router.post("/:id/activate", requirePermission(P.RESTAURANT_ACTIVATE), c.activate);
 router.post("/:id/suspend", requirePermission(P.RESTAURANT_SUSPEND), c.suspend);
 
-// Onboarding
-router.get("/:id/onboarding", requirePermission(P.RESTAURANT_VIEW), c.getOnboarding);
-router.patch("/:id/onboarding/tasks/:taskKey", requirePermission(P.RESTAURANT_ONBOARDING_MANAGE), c.updateOnboardingTask);
-router.post("/:id/onboarding/stage", requirePermission(P.RESTAURANT_ONBOARDING_MANAGE), c.setOnboardingStage);
+// Onboarding is no longer a restaurant concern. It belongs to the customer who
+// bought the software — a four-outlet group onboards once, not four times — so
+// it lives under /onboarding, keyed by account.
 
 // Restaurant users
 router.get("/:id/users", requirePermission(P.RESTAURANT_USER_VIEW), c.listUsers);

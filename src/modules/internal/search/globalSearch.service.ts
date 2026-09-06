@@ -1,4 +1,5 @@
 import prisma from "../../../config/prisma";
+import { accountWhere, relatedAccountWhere } from "../rbac/scope";
 import { PERMISSIONS } from "../rbac/permissions";
 import { maskPhone } from "../shared/pii";
 
@@ -18,7 +19,7 @@ import { maskPhone } from "../shared/pii";
  */
 
 export interface SearchHit {
-  type: "restaurant" | "customer" | "order" | "transaction" | "ticket" | "employee";
+  type: "account" | "restaurant" | "customer" | "order" | "transaction" | "ticket" | "employee";
   id: number;
   displayId: string;
   title: string;
@@ -29,19 +30,46 @@ export interface SearchHit {
 
 const RESULT_LIMIT = 5;
 
-export const globalSearch = async (term: string, permissions: Set<string>): Promise<SearchHit[]> => {
+export const globalSearch = async (
+  req: any,
+  term: string,
+  permissions: Set<string>,
+): Promise<SearchHit[]> => {
   const query = term.trim();
   if (query.length < 2) return [];
 
   const hits: SearchHit[] = [];
   const can = (permission: string) => permissions.has(permission);
 
+  // Search obeys the same account scope as every list. Otherwise it would be
+  // the one place an assigned-only employee could enumerate the whole customer
+  // base by typing names into a box.
+  const accountScope = accountWhere(req);
+  const viaAccount = relatedAccountWhere(req);
+
   // ── Exact identifier lookups ───────────────────────────────────────────────
-  const prefixed = query.match(/^(res|cust|customer|ord|txn|dine|emp)-(\d+)$/i);
+  const prefixed = query.match(/^(acc|res|cust|customer|ord|txn|dine|emp)-(\d+)$/i);
   if (prefixed) {
     const [, prefixRaw, numberRaw] = prefixed;
     const prefix = prefixRaw.toUpperCase();
     const id = Number(numberRaw);
+
+    if (prefix === "ACC" && can(PERMISSIONS.ACCOUNT_VIEW)) {
+      const account = await prisma.account.findFirst({
+        where: { AND: [accountScope, { id }] },
+        select: { id: true, accountCode: true, name: true, city: true, status: true },
+      });
+      if (account) {
+        hits.push({
+          type: "account",
+          id: account.id,
+          displayId: account.accountCode,
+          title: account.name,
+          subtitle: [account.city, account.status].filter(Boolean).join(" · "),
+          href: `/customers/${account.id}`,
+        });
+      }
+    }
 
     if (prefix === "RES" && can(PERMISSIONS.RESTAURANT_VIEW)) {
       const restaurant = await prisma.restaurant.findUnique({

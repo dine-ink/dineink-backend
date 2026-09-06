@@ -1,4 +1,5 @@
 import prisma from "../../../config/prisma";
+import { accountWhere, relatedAccountWhere } from "../rbac/scope";
 import { invalidState } from "../shared/apiError";
 import { applyContactMasking } from "../shared/pii";
 import { PERMISSIONS } from "../rbac/permissions";
@@ -28,15 +29,27 @@ export interface ReportDefinition {
 export const REPORTS: ReportDefinition[] = [
   {
     key: "accounts",
-    name: "Accounts",
-    description: "Every restaurant account with status, outlets, orders and last activity.",
-    permissions: [PERMISSIONS.RESTAURANT_VIEW],
+    name: "Customers",
+    description: "Every customer account with lifecycle status, owner, products, plans and onboarding state.",
+    permissions: [PERMISSIONS.ACCOUNT_VIEW],
   },
   {
-    key: "account-usage",
-    name: "Account usage",
-    description: "Orders and value processed per account over a date range.",
-    permissions: [PERMISSIONS.RESTAURANT_VIEW, PERMISSIONS.ANALYTICS_VIEW],
+    key: "subscriptions",
+    name: "Subscriptions",
+    description: "Every subscription with product, plan, status and key dates. Plan pricing needs the revenue permission.",
+    permissions: [PERMISSIONS.SUBSCRIPTION_VIEW],
+  },
+  {
+    key: "invoices",
+    name: "Invoices",
+    description: "Invoices raised to customers over a date range, with amounts paid and outstanding.",
+    permissions: [PERMISSIONS.INVOICE_VIEW, PERMISSIONS.ANALYTICS_FINANCIAL_VIEW],
+  },
+  {
+    key: "product-adoption",
+    name: "Product adoption",
+    description: "How many subscriptions sit on each product and plan, by status.",
+    permissions: [PERMISSIONS.SUBSCRIPTION_VIEW, PERMISSIONS.ANALYTICS_VIEW],
   },
   {
     key: "support-tickets",
@@ -52,8 +65,8 @@ export const REPORTS: ReportDefinition[] = [
   },
   {
     key: "customers",
-    name: "Customers",
-    description: "Diner records held by restaurants. Contact details are masked without the PII permission.",
+    name: "Diners",
+    description: "Diner records held by customers' restaurants. Contact details are masked without the PII permission.",
     permissions: [PERMISSIONS.CUSTOMER_VIEW],
     large: true,
   },
@@ -77,6 +90,7 @@ export interface ReportResult {
 const ROW_LIMIT = 5000;
 
 export const buildReport = async (
+  req: any,
   key: string,
   query: any,
   permissions: Set<string>,
@@ -93,78 +107,169 @@ export const buildReport = async (
 
   switch (key) {
     case "accounts": {
-      const rows = await prisma.restaurant.findMany({
+      const rows = await prisma.account.findMany({
+        where: accountWhere(req),
         orderBy: { createdAt: "asc" },
         take: ROW_LIMIT,
         select: {
           id: true,
+          accountCode: true,
           name: true,
           city: true,
           state: true,
-          platformStatus: true,
-          onboardingStage: true,
+          status: true,
           createdAt: true,
-          activatedAt: true,
-          lastActivityAt: true,
-          _count: { select: { branches: true, users: true, customers: true } },
+          becameCustomerAt: true,
+          churnedAt: true,
+          owner: { select: { name: true } },
+          subscriptions: {
+            where: { status: { in: ["ACTIVE", "TRIAL", "PAST_DUE"] } },
+            select: { product: { select: { name: true } }, plan: { select: { name: true } }, status: true },
+          },
+          onboardings: { orderBy: { createdAt: "desc" }, take: 1, select: { status: true } },
+          _count: { select: { restaurants: true, contacts: true } },
         },
       });
       return {
         columns: [
-          "Account ID", "Name", "City", "State", "Status", "Stage",
-          "Outlets", "Staff", "Diners", "Created", "Live since", "Last activity",
+          "Account", "Name", "City", "State", "Status", "Owner",
+          "Products", "Plans", "Subscription status", "Onboarding",
+          "Systems", "Contacts", "Created", "Customer since", "Churned",
         ],
         rows: rows.map((r) => [
-          `RES-${r.id}`,
+          r.accountCode,
           r.name,
           r.city,
           r.state,
-          r.platformStatus,
-          r.onboardingStage,
-          r._count.branches,
-          r._count.users,
-          r._count.customers,
+          r.status,
+          r.owner?.name ?? null,
+          // A customer can hold more than one subscription, so these columns
+          // list rather than assume one.
+          r.subscriptions.map((s) => s.product.name).join("; ") || null,
+          r.subscriptions.map((s) => s.plan?.name ?? "—").join("; ") || null,
+          r.subscriptions.map((s) => s.status).join("; ") || null,
+          r.onboardings[0]?.status ?? null,
+          r._count.restaurants,
+          r._count.contacts,
           r.createdAt.toISOString().slice(0, 10),
-          r.activatedAt ? r.activatedAt.toISOString().slice(0, 10) : null,
-          r.lastActivityAt ? r.lastActivityAt.toISOString().slice(0, 10) : null,
+          r.becameCustomerAt ? r.becameCustomerAt.toISOString().slice(0, 10) : null,
+          r.churnedAt ? r.churnedAt.toISOString().slice(0, 10) : null,
         ]),
         rowCount: rows.length,
         truncated: rows.length === ROW_LIMIT,
       };
     }
 
-    case "account-usage": {
-      const grouped = await prisma.bill.groupBy({
-        by: ["restaurantId"],
-        where: { createdAt: { gte: from, lte: to }, status: { not: "CANCELLED" } },
-        _count: { _all: true },
-        _sum: { total: true },
-        _max: { createdAt: true },
+    case "subscriptions": {
+      const rows = await prisma.subscription.findMany({
+        where: relatedAccountWhere(req),
+        orderBy: { startDate: "desc" },
+        take: ROW_LIMIT,
+        include: {
+          account: { select: { accountCode: true, name: true } },
+          product: { select: { name: true } },
+          plan: { select: { name: true, priceAmount: true, currency: true } },
+        },
       });
-      const names = await prisma.restaurant.findMany({
-        where: { id: { in: grouped.map((g) => g.restaurantId) } },
-        select: { id: true, name: true, platformStatus: true },
-      });
-      const byId = new Map(names.map((n) => [n.id, n]));
       const canSeeMoney = permissions.has(PERMISSIONS.ANALYTICS_FINANCIAL_VIEW);
-
       return {
         columns: [
-          "Account ID", "Name", "Status", "Orders",
-          ...(canSeeMoney ? ["Value processed"] : []),
-          "Last order",
+          "Subscription", "Account", "Name", "Product", "Plan", "Status",
+          "Billing interval", ...(canSeeMoney ? ["Plan price", "Currency"] : []),
+          "Start", "Trial ends", "Renewal", "Cancelled",
         ],
-        rows: grouped
+        rows: rows.map((s) => [
+          s.subscriptionCode,
+          s.account.accountCode,
+          s.account.name,
+          s.product.name,
+          s.plan?.name ?? null,
+          s.status,
+          s.billingInterval,
+          // Null price stays null in the export, never zero: the file has to
+          // carry the same "not configured" meaning the screen does.
+          ...(canSeeMoney
+            ? [
+                s.plan?.priceAmount === null || s.plan?.priceAmount === undefined
+                  ? null
+                  : Number(s.plan.priceAmount),
+                s.plan?.currency ?? null,
+              ]
+            : []),
+          s.startDate.toISOString().slice(0, 10),
+          s.trialEndsAt ? s.trialEndsAt.toISOString().slice(0, 10) : null,
+          s.renewalDate ? s.renewalDate.toISOString().slice(0, 10) : null,
+          s.cancelledAt ? s.cancelledAt.toISOString().slice(0, 10) : null,
+        ]),
+        rowCount: rows.length,
+        truncated: rows.length === ROW_LIMIT,
+      };
+    }
+
+    case "invoices": {
+      const rows = await prisma.invoice.findMany({
+        where: {
+          AND: [
+            relatedAccountWhere(req),
+            { issueDate: { gte: from, lte: to } },
+          ],
+        },
+        orderBy: { issueDate: "desc" },
+        take: ROW_LIMIT,
+        include: {
+          account: { select: { accountCode: true, name: true, gstNumber: true } },
+          subscription: { select: { subscriptionCode: true } },
+        },
+      });
+      return {
+        columns: [
+          "Invoice", "Account", "Name", "GST", "Subscription", "Status",
+          "Issued", "Due", "Subtotal", "Tax", "Total", "Paid", "Outstanding", "Currency",
+        ],
+        rows: rows.map((i) => [
+          i.invoiceNo,
+          i.account.accountCode,
+          i.account.name,
+          i.account.gstNumber,
+          i.subscription?.subscriptionCode ?? null,
+          i.status,
+          i.issueDate ? i.issueDate.toISOString().slice(0, 10) : null,
+          i.dueDate ? i.dueDate.toISOString().slice(0, 10) : null,
+          Number(i.subtotal),
+          i.taxAmount === null ? null : Number(i.taxAmount),
+          Number(i.total),
+          Number(i.amountPaid),
+          Math.max(0, Number(i.total) - Number(i.amountPaid)),
+          i.currency,
+        ]),
+        rowCount: rows.length,
+        truncated: rows.length === ROW_LIMIT,
+      };
+    }
+
+    case "product-adoption": {
+      const rows = await prisma.subscription.groupBy({
+        by: ["productId", "planId", "status"],
+        where: relatedAccountWhere(req),
+        _count: { _all: true },
+      });
+      const [products, plans] = await Promise.all([
+        prisma.product.findMany({ select: { id: true, name: true } }),
+        prisma.plan.findMany({ select: { id: true, name: true } }),
+      ]);
+      const productById = new Map(products.map((p) => [p.id, p.name]));
+      const planById = new Map(plans.map((p) => [p.id, p.name]));
+      return {
+        columns: ["Product", "Plan", "Subscription status", "Subscriptions"],
+        rows: rows
           .sort((a, b) => b._count._all - a._count._all)
-          .map((g) => [
-            `RES-${g.restaurantId}`,
-            byId.get(g.restaurantId)?.name ?? null,
-            byId.get(g.restaurantId)?.platformStatus ?? null,
-            g._count._all,
-            ...(canSeeMoney ? [g._sum.total ?? 0] : []),
-            g._max.createdAt ? g._max.createdAt.toISOString().slice(0, 10) : null,
+          .map((r) => [
+            productById.get(r.productId) ?? `#${r.productId}`,
+            r.planId ? (planById.get(r.planId) ?? `#${r.planId}`) : null,
+            r.status,
+            r._count._all,
           ]),
-        rowCount: grouped.length,
+        rowCount: rows.length,
         truncated: false,
       };
     }

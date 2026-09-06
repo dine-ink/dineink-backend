@@ -1,7 +1,6 @@
 import prisma from "../../../config/prisma";
+import { assertAccountAccess } from "../rbac/scope";
 import { AUDIT_ACTIONS, auditData, listAuditForResource } from "../audit/audit.service";
-import { createOnboardingChecklist, getChecklist } from "../onboarding/onboarding.service";
-import { classifyActivity, getActivityThresholds } from "../settings/platformSettings.service";
 import { conflict, invalidState, notFound } from "../shared/apiError";
 import { parsePage, parseSort, toPaged } from "../shared/pagination";
 import { aggregateByRestaurant, refreshRestaurantActivity, restaurantKpis } from "./restaurantMetrics.service";
@@ -26,7 +25,6 @@ export interface RestaurantListQuery {
   onboardingStage?: string;
   city?: string;
   state?: string;
-  activity?: string;
   sortBy?: string;
   sortDir?: string;
 }
@@ -50,19 +48,18 @@ const buildSearchFilter = (search: string) => {
 };
 
 export const listRestaurants = async (query: RestaurantListQuery) => {
-  // Keeps the activity column current enough to filter and sort on; throttled
-  // internally so a burst of requests triggers at most one refresh.
+  // Keeps lastActivityAt current enough to sort on; throttled internally so a
+  // burst of requests triggers at most one refresh.
   await refreshRestaurantActivity();
 
   const page = parsePage(query);
   const sort = parseSort(query, RESTAURANT_SORT_FIELDS, "createdAt");
-  const thresholds = await getActivityThresholds();
 
-  // Every filter is appended as its own AND clause. Search and the INACTIVE
-  // activity bucket are each an OR of several conditions, and putting two ORs
-  // side by side at the top level of a Prisma `where` merges them into one —
-  // which would return rows matching the search *or* the activity rather than
-  // both. Keeping each in its own AND entry makes them compose correctly.
+  // Every filter is appended as its own AND clause. Search is an OR of several
+  // conditions, and two ORs side by side at the top level of a Prisma `where`
+  // merge into one — which would return rows matching the search *or* the other
+  // filter rather than both. Keeping each in its own AND entry composes
+  // correctly.
   const filters: any[] = [];
 
   if (query.search?.trim()) filters.push({ OR: buildSearchFilter(query.search) });
@@ -71,37 +68,15 @@ export const listRestaurants = async (query: RestaurantListQuery) => {
   if (query.city) filters.push({ city: { equals: query.city, mode: "insensitive" } });
   if (query.state) filters.push({ state: { equals: query.state, mode: "insensitive" } });
 
-  // Activity is a function of lastActivityAt and the configured thresholds, so
-  // it becomes a date range in the query rather than a post-filter — filtering
-  // after pagination would return the wrong rows for every page but the first.
-  if (query.activity) {
-    const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000);
-    const activityFilter = ((): any | null => {
-      switch (query.activity) {
-        case "ACTIVE":
-          return { lastActivityAt: { gte: daysAgo(1) } };
-        case "LOW_ACTIVITY":
-          return { lastActivityAt: { gte: daysAgo(thresholds.inactiveDays), lt: daysAgo(1) } };
-        case "AT_RISK":
-          return {
-            lastActivityAt: { gte: daysAgo(thresholds.atRiskDays), lt: daysAgo(thresholds.inactiveDays) },
-          };
-        case "INACTIVE":
-          // A live restaurant that has never taken an order counts as inactive;
-          // one that isn't live yet is simply not trading and doesn't belong in
-          // the operations team's inactive queue.
-          return {
-            OR: [
-              { lastActivityAt: { lt: daysAgo(thresholds.atRiskDays) } },
-              { lastActivityAt: null, platformStatus: "ACTIVE" },
-            ],
-          };
-        default:
-          return null;
-      }
-    })();
-    if (activityFilter) filters.push(activityFilter);
-  }
+  // The `activity` filter is gone. It bucketed restaurants into ACTIVE /
+  // LOW_ACTIVITY / AT_RISK / INACTIVE from how recently they had taken an
+  // order, which is a churn model for a marketplace, not for a software
+  // vendor: a cafe closed for a fortnight is not a customer we are losing.
+  //
+  // `lastActivityAt` is still recorded and still shown, because "when did this
+  // tenant last process an order" is a genuinely useful support signal — it is
+  // simply no longer dressed up as a commercial risk score. Renewal date and
+  // payment status carry that meaning now.
 
   const where: any = filters.length ? { AND: filters } : {};
 
@@ -142,7 +117,6 @@ export const listRestaurants = async (query: RestaurantListQuery) => {
       orders: agg?.orders ?? 0,
       revenue: agg?.revenue ?? 0,
       lastActivityAt: row.lastActivityAt ?? agg?.lastOrderAt ?? null,
-      activity: classifyActivity(row.lastActivityAt ?? agg?.lastOrderAt ?? null, thresholds, row.platformStatus),
       _count: undefined,
     };
   });
@@ -178,11 +152,7 @@ export const getRestaurant = async (restaurantId: number) => {
   });
   if (!restaurant) throw notFound("Restaurant not found", "RESTAURANT_NOT_FOUND");
 
-  const [kpis, thresholds, checklist] = await Promise.all([
-    restaurantKpis(restaurantId),
-    getActivityThresholds(),
-    getChecklist(restaurantId),
-  ]);
+  const kpis = await restaurantKpis(restaurantId);
 
   return {
     id: restaurant.id,
@@ -203,12 +173,9 @@ export const getRestaurant = async (restaurantId: number) => {
     suspensionReason: restaurant.suspensionReason,
     internalNotes: restaurant.internalNotes,
     createdAt: restaurant.createdAt,
+    // Reported as what it is — when this tenant last processed an order — not
+    // as a risk classification.
     lastActivityAt: restaurant.lastActivityAt ?? kpis.lastOrderAt,
-    activity: classifyActivity(
-      restaurant.lastActivityAt ?? kpis.lastOrderAt,
-      thresholds,
-      restaurant.platformStatus,
-    ),
     owner: restaurant.owner,
     branches: restaurant.branches,
     counts: {
@@ -218,7 +185,6 @@ export const getRestaurant = async (restaurantId: number) => {
       users: restaurant._count.users,
     },
     kpis,
-    onboarding: checklist.summary,
   };
 };
 
@@ -256,6 +222,10 @@ export const getRestaurantFinancialProfile = async (restaurantId: number) => {
 };
 
 export interface CreateRestaurantInput {
+  /** The customer this tenant belongs to. Required — a system with no owner is
+   *  a system nobody is paying for, and it would be invisible to every scoped
+   *  query. */
+  accountId: number;
   name: string;
   email?: string | null;
   phone?: string | null;
@@ -270,6 +240,14 @@ export interface CreateRestaurantInput {
 export const createRestaurant = async (req: any, input: CreateRestaurantInput) => {
   const name = input.name?.trim();
   if (!name) throw invalidState("Enter the restaurant's name.", "NAME_REQUIRED");
+  if (!input.accountId) throw invalidState("Choose the customer this system belongs to.", "ACCOUNT_REQUIRED");
+
+  await assertAccountAccess(req, input.accountId);
+  const account = await prisma.account.findUnique({
+    where: { id: input.accountId },
+    select: { id: true, name: true },
+  });
+  if (!account) throw notFound("No customer with that id.", "ACCOUNT_NOT_FOUND");
 
   const duplicate = await prisma.restaurant.findFirst({
     where: {
@@ -297,12 +275,13 @@ export const createRestaurant = async (req: any, input: CreateRestaurantInput) =
         pincode: input.pincode?.trim() || null,
         cuisine: input.cuisine?.trim() || null,
         internalNotes: input.internalNotes?.trim() || null,
-        platformStatus: "LEAD",
-        onboardingStage: "LEAD",
+        // A tenant is provisioned for a customer that already exists. The
+        // commercial record is the Account; this is the system it runs on.
+        accountId: input.accountId,
+        platformStatus: "ONBOARDING",
+        onboardingStage: "ONBOARDING",
       },
     });
-
-    await createOnboardingChecklist(tx, restaurant.id);
 
     await tx.internalAuditLog.create({
       data: auditData(req, {
@@ -369,12 +348,11 @@ export const updateRestaurant = async (req: any, restaurantId: number, input: Re
 };
 
 /**
- * Going live.
+ * Enables the tenant.
  *
- * The mandatory checklist is enforced here, in the service, and not merely
- * disabled in the UI — the brief is explicit that activation must be blocked
- * when mandatory requirements are incomplete, and a button that is only
- * greyed out is not a block.
+ * A technical act: the restaurant's staff can sign in and take orders. This is
+ * not the same as the customer going live, which is signed off on the account's
+ * onboarding and carries the mandatory-checklist gate.
  */
 export const activateRestaurant = async (req: any, restaurantId: number, reason?: string | null) => {
   const restaurant = await prisma.restaurant.findUnique({
@@ -387,29 +365,15 @@ export const activateRestaurant = async (req: any, restaurantId: number, reason?
     throw invalidState(`${restaurant.name} is already active.`, "ALREADY_ACTIVE");
   }
 
-  // getChecklist materializes the checklist if the restaurant hasn't got one,
-  // so this can't be evaluated against an empty task list.
-  const { summary } = await getChecklist(restaurantId);
-
-  // Belt and braces: an empty checklist produces zero blockers, which would
-  // read as "everything complete". If the template ever failed to materialize,
-  // refuse rather than wave the restaurant through.
-  if (summary.mandatoryTotal === 0) {
-    throw invalidState(
-      `${restaurant.name} has no onboarding checklist, so it can't be verified as ready. Open the Onboarding tab to generate one.`,
-      "ONBOARDING_CHECKLIST_MISSING",
-    );
-  }
-
-  if (summary.blockers.length) {
-    throw invalidState(
-      `${restaurant.name} can't go live yet — ${summary.blockers.length} mandatory onboarding step${
-        summary.blockers.length === 1 ? "" : "s"
-      } outstanding.`,
-      "ONBOARDING_INCOMPLETE",
-      { blockers: summary.blockers },
-    );
-  }
+  // The onboarding gate is no longer here.
+  //
+  // Activating a restaurant is now a *technical* act — enabling the tenant so
+  // its staff can sign in and take orders. Declaring the *customer* live, which
+  // is the thing that needs every mandatory step signed off, happens on the
+  // account's onboarding (see onboarding.service.goLive). Keeping the gate in
+  // both places would mean two sources of truth that could disagree, and the
+  // account is the one that matches how the business actually works: a group
+  // goes live once, even if its four tenants are enabled on four days.
 
   const [updated] = await prisma.$transaction([
     prisma.restaurant.update({

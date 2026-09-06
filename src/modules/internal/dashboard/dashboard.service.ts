@@ -1,16 +1,24 @@
 import prisma from "../../../config/prisma";
 import { PERMISSIONS } from "../rbac/permissions";
-import { getActivityThresholds } from "../settings/platformSettings.service";
-import { refreshRestaurantActivity } from "../restaurants/restaurantMetrics.service";
+import { accountWhere, relatedAccountWhere } from "../rbac/scope";
 
 /**
  * The operations dashboard.
  *
- * Role-aware in the way that actually matters: it doesn't compute everything
- * and let the frontend hide half of it. An employee without
- * ANALYTICS_FINANCIAL_VIEW never has GMV or revenue calculated for them, so the
- * numbers are not in the response at all — and the queries behind them aren't
- * run either.
+ * Rewritten around the commercial model. It previously counted restaurants and
+ * their order volume, which described our customers' trade rather than our
+ * business, and flagged accounts "at risk" for not having taken an order —
+ * a marketplace's churn signal, not a software vendor's.
+ *
+ * What it reports now is what DineInk actually needs to know each morning: how
+ * many customers there are, what they are subscribed to, who is mid-onboarding,
+ * what is unpaid, and what support is carrying.
+ *
+ * Role-aware in the way that matters: it doesn't compute everything and let the
+ * frontend hide half of it. An employee without ANALYTICS_FINANCIAL_VIEW never
+ * has revenue calculated for them — the queries behind those numbers are not
+ * run at all. Every count is also account-scoped, so an assigned-only employee
+ * sees a dashboard for their own book rather than for the whole company.
  */
 
 export interface DashboardRange {
@@ -20,9 +28,7 @@ export interface DashboardRange {
 
 export const resolveRange = (query: any): DashboardRange => {
   const to = query?.to ? new Date(`${query.to}T23:59:59.999Z`) : new Date();
-  const from = query?.from
-    ? new Date(query.from)
-    : new Date(to.getTime() - 29 * 86_400_000);
+  const from = query?.from ? new Date(query.from) : new Date(to.getTime() - 29 * 86_400_000);
   return { from, to };
 };
 
@@ -31,73 +37,100 @@ const startOfToday = () => {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
 };
 
-export const getDashboard = async (permissions: Set<string>, query: any) => {
+/** Renewals inside this window are "coming up". A display horizon, not a rule. */
+const RENEWAL_HORIZON_DAYS = 30;
+
+export const getDashboard = async (req: any, permissions: Set<string>, query: any) => {
   const range = resolveRange(query);
   const canSeeMoney = permissions.has(PERMISSIONS.ANALYTICS_FINANCIAL_VIEW);
-  const canSeeCustomers = permissions.has(PERMISSIONS.CUSTOMER_VIEW);
   const canSeeTickets = permissions.has(PERMISSIONS.TICKET_VIEW);
+  const canSeeBilling = permissions.has(PERMISSIONS.INVOICE_VIEW);
+  const canSeeSubscriptions = permissions.has(PERMISSIONS.SUBSCRIPTION_VIEW);
+  const canSeeOnboarding = permissions.has(PERMISSIONS.ONBOARDING_VIEW);
 
-  await refreshRestaurantActivity();
-  const thresholds = await getActivityThresholds();
-  const todayStart = startOfToday();
+  const scopedAccounts = accountWhere(req);
+  const scopedByAccount = relatedAccountWhere(req);
 
-  const atRiskCutoff = new Date(Date.now() - thresholds.atRiskDays * 86_400_000);
-
-  const [accountCounts, newAccounts, atRiskAccounts, outletCount, ordersInRange, ordersToday] = await Promise.all([
-    prisma.restaurant.groupBy({ by: ["platformStatus"], _count: { _all: true } }),
-    prisma.restaurant.count({ where: { createdAt: { gte: range.from, lte: range.to } } }),
-    // Live accounts that have stopped trading. For subscription SaaS this is
-    // the leading churn indicator — an account still paying but not using the
-    // product is the one about to leave.
-    prisma.restaurant.count({
+  const [accountCounts, newAccounts, outletCount] = await Promise.all([
+    prisma.account.groupBy({ by: ["status"], where: scopedAccounts, _count: { _all: true } }),
+    prisma.account.count({
+      where: { ...scopedAccounts, createdAt: { gte: range.from, lte: range.to } },
+    }),
+    prisma.branch.count({
       where: {
-        platformStatus: "ACTIVE",
-        OR: [{ lastActivityAt: { lt: atRiskCutoff } }, { lastActivityAt: null }],
+        isDeleted: false,
+        operationalStatus: "ACTIVE",
+        ...(Object.keys(scopedAccounts).length ? { restaurant: { account: scopedAccounts } } : {}),
       },
     }),
-    prisma.branch.count({ where: { isDeleted: false } }),
-    prisma.bill.count({ where: { createdAt: { gte: range.from, lte: range.to }, status: { not: "CANCELLED" } } }),
-    prisma.bill.count({ where: { createdAt: { gte: todayStart }, status: { not: "CANCELLED" } } }),
   ]);
 
-  const byStatus = new Map(accountCounts.map((row) => [row.platformStatus, row._count._all]));
+  const byStatus = new Map(accountCounts.map((row) => [row.status, row._count._all]));
   const totalAccounts = accountCounts.reduce((sum, row) => sum + row._count._all, 0);
-  const liveAccounts = byStatus.get("ACTIVE") ?? 0;
 
-  /**
-   * The KPIs are about DineInk's accounts, not about diners.
-   *
-   * An earlier version led with "total customers" and "orders today", which are
-   * our restaurants' business presented as if it were ours — the console read
-   * like it belonged to a restaurant rather than to the company selling to
-   * them. Orders and GMV are still here, but as *value delivered through the
-   * product*: how much trade our customers are putting through it, which is
-   * what tells us an account is getting its money's worth.
-   */
   const kpis: Record<string, unknown> = {
     totalAccounts,
-    liveAccounts,
-    onboardingAccounts: (byStatus.get("ONBOARDING") ?? 0) + (byStatus.get("LEAD") ?? 0),
-    suspendedAccounts: byStatus.get("SUSPENDED") ?? 0,
-    churnedAccounts: byStatus.get("CHURNED") ?? 0,
+    customers: byStatus.get("CUSTOMER") ?? 0,
+    leads: byStatus.get("LEAD") ?? 0,
+    prospects: byStatus.get("PROSPECT") ?? 0,
+    churned: byStatus.get("CHURNED") ?? 0,
     newAccounts,
-    atRiskAccounts,
-    // A single café is one account with one outlet; a chain is one account with
-    // many. Both matter — outlets are the unit of deployment.
+    // A single cafe is one customer with one outlet; a chain is one customer
+    // with many. Outlets are the unit of deployment, not of billing.
     totalOutlets: outletCount,
-    ordersToday,
-    ordersInRange,
   };
 
-  if (canSeeTickets) {
-    const [openTickets, highPriorityTickets, unassignedTickets, escalatedTickets] = await Promise.all([
-      prisma.supportTicket.count({ where: { status: { notIn: ["RESOLVED", "CLOSED"] } } }),
-      prisma.supportTicket.count({
-        where: { priority: { in: ["CRITICAL", "HIGH"] }, status: { notIn: ["RESOLVED", "CLOSED"] } },
+  if (canSeeSubscriptions) {
+    const [subscriptionCounts, renewalsDue] = await Promise.all([
+      prisma.subscription.groupBy({
+        by: ["status"],
+        where: scopedByAccount,
+        _count: { _all: true },
       }),
-      prisma.supportTicket.count({ where: { assignedToId: null, status: { notIn: ["RESOLVED", "CLOSED"] } } }),
+      prisma.subscription.count({
+        where: {
+          ...scopedByAccount,
+          status: { in: ["ACTIVE", "TRIAL"] },
+          renewalDate: {
+            gte: new Date(),
+            lte: new Date(Date.now() + RENEWAL_HORIZON_DAYS * 86_400_000),
+          },
+        },
+      }),
+    ]);
+    const subsByStatus = new Map(subscriptionCounts.map((row) => [row.status, row._count._all]));
+    kpis.activeSubscriptions = subsByStatus.get("ACTIVE") ?? 0;
+    kpis.trialSubscriptions = subsByStatus.get("TRIAL") ?? 0;
+    kpis.pastDueSubscriptions = subsByStatus.get("PAST_DUE") ?? 0;
+    kpis.pausedSubscriptions = subsByStatus.get("PAUSED") ?? 0;
+    kpis.cancelledSubscriptions = subsByStatus.get("CANCELLED") ?? 0;
+    kpis.renewalsDue = renewalsDue;
+  }
+
+  if (canSeeOnboarding) {
+    const onboardingCounts = await prisma.onboarding.groupBy({
+      by: ["status"],
+      where: scopedByAccount,
+      _count: { _all: true },
+    });
+    const byOnboarding = new Map(onboardingCounts.map((row) => [row.status, row._count._all]));
+    kpis.onboardingInProgress = byOnboarding.get("IN_PROGRESS") ?? 0;
+    kpis.onboardingBlocked = byOnboarding.get("BLOCKED") ?? 0;
+    kpis.onboardingReadyForGoLive = byOnboarding.get("READY_FOR_GO_LIVE") ?? 0;
+  }
+
+  if (canSeeTickets) {
+    const ticketWhere = ticketScope(req);
+    const [openTickets, highPriorityTickets, unassignedTickets, escalatedTickets] = await Promise.all([
+      prisma.supportTicket.count({ where: { ...ticketWhere, status: { notIn: ["RESOLVED", "CLOSED"] } } }),
       prisma.supportTicket.count({
-        where: { status: { in: ["ESCALATED_TO_ENGINEERING", "ENGINEERING_RESOLVED"] } },
+        where: { ...ticketWhere, priority: { in: ["CRITICAL", "HIGH"] }, status: { notIn: ["RESOLVED", "CLOSED"] } },
+      }),
+      prisma.supportTicket.count({
+        where: { ...ticketWhere, assignedToId: null, status: { notIn: ["RESOLVED", "CLOSED"] } },
+      }),
+      prisma.supportTicket.count({
+        where: { ...ticketWhere, status: { in: ["ESCALATED_TO_ENGINEERING", "ENGINEERING_RESOLVED"] } },
       }),
     ]);
     kpis.openTickets = openTickets;
@@ -106,70 +139,93 @@ export const getDashboard = async (permissions: Set<string>, query: any) => {
     kpis.escalatedTickets = escalatedTickets;
   }
 
-  if (canSeeMoney) {
-    const gmvAgg = await prisma.bill.aggregate({
-      where: { createdAt: { gte: range.from, lte: range.to }, status: { not: "CANCELLED" } },
-      _sum: { total: true },
-    });
-
-    // GMV is our customers' trade, not our income. It's the clearest signal of
-    // whether an account is getting value out of the product, so it stays —
-    // but it is never labelled as DineInk revenue.
-    //
-    // There is deliberately no "Dine revenue" figure. DineInk sells the product
-    // on subscription; it does not take a cut of what restaurants sell, and
-    // there is no plan or subscription model in the schema to compute real
-    // revenue from. A commission-shaped number here would have been wrong in
-    // kind, not merely unset.
-    kpis.gmvProcessed = gmvAgg._sum.total ?? 0;
+  if (canSeeBilling) {
+    const [outstanding, overdueCount] = await Promise.all([
+      prisma.invoice.aggregate({
+        where: { ...scopedByAccount, status: { in: ["ISSUED", "PARTIALLY_PAID", "OVERDUE"] } },
+        _sum: { total: true, amountPaid: true },
+        _count: { _all: true },
+      }),
+      prisma.invoice.count({
+        where: {
+          ...scopedByAccount,
+          status: { in: ["ISSUED", "PARTIALLY_PAID"] },
+          dueDate: { lt: new Date() },
+        },
+      }),
+    ]);
+    kpis.openInvoices = outstanding._count._all;
+    kpis.overdueInvoices = overdueCount;
+    // Outstanding is only meaningful to someone allowed to see money. Without
+    // the financial grant the count of open invoices is still useful, the
+    // amount is not shown.
+    if (canSeeMoney) {
+      const billed = Number(outstanding._sum.total ?? 0);
+      const paid = Number(outstanding._sum.amountPaid ?? 0);
+      kpis.outstandingAmount = Math.max(0, billed - paid);
+    }
   }
 
   const [alerts, charts] = await Promise.all([
-    buildAlerts(permissions, thresholds),
-    buildCharts(range, canSeeMoney),
+    buildAlerts(req, permissions),
+    buildCharts(req, range),
   ]);
 
   return {
-    range: { from: range.from, to: range.to },
+    range,
+    capabilities: {
+      financial: canSeeMoney,
+      tickets: canSeeTickets,
+      billing: canSeeBilling,
+      subscriptions: canSeeSubscriptions,
+      onboarding: canSeeOnboarding,
+    },
     kpis,
     alerts,
     charts,
-    capabilities: {
-      financial: canSeeMoney,
-      customers: canSeeCustomers,
-      tickets: canSeeTickets,
-    },
   };
 };
 
-export interface DashboardAlert {
-  key: string;
-  severity: "CRITICAL" | "WARNING" | "INFO";
-  title: string;
-  detail: string;
-  count: number;
-  href?: string;
-}
+/**
+ * Ticket scoping.
+ *
+ * A ticket reaches an account through `accountId`. Tickets raised before the
+ * commercial model existed, or about something that isn't account-specific,
+ * have none — those stay visible to global-scope callers and are hidden from
+ * assigned-only ones, which is the safe direction.
+ */
+const ticketScope = (req: any): Record<string, unknown> => {
+  const scoped = relatedAccountWhere(req);
+  return Object.keys(scoped).length ? scoped : {};
+};
 
 /**
- * Operational alerts. Each one is a real query with a real count — an alert
- * panel that shows a category with nothing behind it trains people to ignore it.
- * Alerts an employee has no permission to act on are not returned.
+ * The things worth interrupting someone about.
+ *
+ * Every alert is a queue with a name and a link. Nothing here is an inferred
+ * risk score — each one is a concrete state a person can act on: a blocked
+ * onboarding, an overdue invoice, an unassigned ticket.
  */
-const buildAlerts = async (
-  permissions: Set<string>,
-  thresholds: { inactiveDays: number; atRiskDays: number },
-): Promise<DashboardAlert[]> => {
-  const alerts: DashboardAlert[] = [];
-  const atRiskCutoff = new Date(Date.now() - thresholds.atRiskDays * 86_400_000);
+const buildAlerts = async (req: any, permissions: Set<string>) => {
+  const alerts: {
+    key: string;
+    severity: "CRITICAL" | "WARNING" | "INFO";
+    title: string;
+    detail: string;
+    count: number;
+    href: string;
+  }[] = [];
+
+  const scopedByAccount = relatedAccountWhere(req);
 
   if (permissions.has(PERMISSIONS.TICKET_VIEW)) {
+    const ticketWhere = ticketScope(req);
     const [critical, unassigned] = await Promise.all([
       prisma.supportTicket.count({
-        where: { priority: { in: ["CRITICAL", "HIGH"] }, status: { notIn: ["RESOLVED", "CLOSED"] } },
+        where: { ...ticketWhere, priority: { in: ["CRITICAL", "HIGH"] }, status: { notIn: ["RESOLVED", "CLOSED"] } },
       }),
       prisma.supportTicket.count({
-        where: { assignedToId: null, status: { notIn: ["RESOLVED", "CLOSED"] } },
+        where: { ...ticketWhere, assignedToId: null, status: { notIn: ["RESOLVED", "CLOSED"] } },
       }),
     ]);
     if (critical > 0) {
@@ -179,7 +235,7 @@ const buildAlerts = async (
         title: `${critical} high-priority ticket${critical === 1 ? "" : "s"} open`,
         detail: "Critical and high-priority support tickets that aren't resolved yet.",
         count: critical,
-        href: "/support-tickets?priority=CRITICAL,HIGH&status=open",
+        href: "/support/tickets?priority=CRITICAL,HIGH&status=open",
       });
     }
     if (unassigned > 0) {
@@ -189,60 +245,83 @@ const buildAlerts = async (
         title: `${unassigned} ticket${unassigned === 1 ? "" : "s"} unassigned`,
         detail: "Nobody is currently working these.",
         count: unassigned,
-        href: "/support-tickets?assigned=none",
+        href: "/support/tickets?assigned=none",
       });
     }
   }
 
-  if (permissions.has(PERMISSIONS.RESTAURANT_VIEW)) {
-    const [inactive, stalledOnboarding] = await Promise.all([
-      prisma.restaurant.count({
+  if (permissions.has(PERMISSIONS.ONBOARDING_VIEW)) {
+    const [blocked, readyForGoLive] = await Promise.all([
+      prisma.onboarding.count({ where: { ...scopedByAccount, status: "BLOCKED" } }),
+      prisma.onboarding.count({ where: { ...scopedByAccount, status: "READY_FOR_GO_LIVE" } }),
+    ]);
+    if (blocked > 0) {
+      alerts.push({
+        key: "blocked-onboarding",
+        severity: "WARNING",
+        title: `${blocked} onboarding${blocked === 1 ? "" : "s"} blocked`,
+        detail: "Waiting on something before they can progress.",
+        count: blocked,
+        href: "/onboarding?status=BLOCKED",
+      });
+    }
+    if (readyForGoLive > 0) {
+      alerts.push({
+        key: "ready-for-go-live",
+        severity: "INFO",
+        title: `${readyForGoLive} customer${readyForGoLive === 1 ? "" : "s"} ready to go live`,
+        detail: "Every mandatory onboarding step is complete.",
+        count: readyForGoLive,
+        href: "/onboarding?status=READY_FOR_GO_LIVE",
+      });
+    }
+  }
+
+  if (permissions.has(PERMISSIONS.SUBSCRIPTION_VIEW)) {
+    const [pastDue, expiringTrials] = await Promise.all([
+      prisma.subscription.count({ where: { ...scopedByAccount, status: "PAST_DUE" } }),
+      prisma.subscription.count({
         where: {
-          platformStatus: "ACTIVE",
-          OR: [{ lastActivityAt: { lt: atRiskCutoff } }, { lastActivityAt: null }],
-        },
-      }),
-      prisma.restaurant.count({
-        where: {
-          platformStatus: { in: ["LEAD", "ONBOARDING"] },
-          createdAt: { lt: new Date(Date.now() - 14 * 86_400_000) },
+          ...scopedByAccount,
+          status: "TRIAL",
+          trialEndsAt: { gte: new Date(), lte: new Date(Date.now() + 7 * 86_400_000) },
         },
       }),
     ]);
-    if (inactive > 0) {
+    if (pastDue > 0) {
       alerts.push({
-        key: "inactive-restaurants",
-        severity: "WARNING",
-        title: `${inactive} live restaurant${inactive === 1 ? "" : "s"} not trading`,
-        detail: `No orders in the last ${thresholds.atRiskDays} days.`,
-        count: inactive,
-        href: "/restaurants?activity=INACTIVE&status=ACTIVE",
+        key: "past-due-subscriptions",
+        severity: "CRITICAL",
+        title: `${pastDue} subscription${pastDue === 1 ? "" : "s"} past due`,
+        detail: "Payment is outstanding on these.",
+        count: pastDue,
+        href: "/commercial/subscriptions?status=PAST_DUE",
       });
     }
-    if (stalledOnboarding > 0) {
+    if (expiringTrials > 0) {
       alerts.push({
-        key: "stalled-onboarding",
-        severity: "INFO",
-        title: `${stalledOnboarding} restaurant${stalledOnboarding === 1 ? "" : "s"} onboarding over 2 weeks`,
-        detail: "Created more than 14 days ago and still not live.",
-        count: stalledOnboarding,
-        href: "/restaurant-onboarding",
+        key: "expiring-trials",
+        severity: "WARNING",
+        title: `${expiringTrials} trial${expiringTrials === 1 ? "" : "s"} ending within a week`,
+        detail: "Convert or extend before they lapse.",
+        count: expiringTrials,
+        href: "/commercial/subscriptions?status=TRIAL",
       });
     }
   }
 
-  if (permissions.has(PERMISSIONS.TRANSACTION_VIEW)) {
-    const failedToday = await prisma.bill.count({
-      where: { createdAt: { gte: startOfToday() }, status: "CANCELLED" },
+  if (permissions.has(PERMISSIONS.INVOICE_VIEW)) {
+    const overdue = await prisma.invoice.count({
+      where: { ...scopedByAccount, status: { in: ["ISSUED", "PARTIALLY_PAID"] }, dueDate: { lt: new Date() } },
     });
-    if (failedToday > 0) {
+    if (overdue > 0) {
       alerts.push({
-        key: "cancelled-payments",
+        key: "overdue-invoices",
         severity: "WARNING",
-        title: `${failedToday} payment${failedToday === 1 ? "" : "s"} cancelled today`,
-        detail: "Bills cancelled after being raised.",
-        count: failedToday,
-        href: "/transactions?status=CANCELLED",
+        title: `${overdue} invoice${overdue === 1 ? "" : "s"} overdue`,
+        detail: "Issued, past their due date and not fully paid.",
+        count: overdue,
+        href: "/commercial/billing?status=OVERDUE",
       });
     }
   }
@@ -251,48 +330,80 @@ const buildAlerts = async (
 };
 
 /**
- * Time series for the dashboard charts.
+ * Charts.
  *
- * Bucketed in SQL rather than by pulling every row into Node and grouping it
- * there — a month of orders across every restaurant is a lot of rows to move
- * just to count them by day.
+ * Customer growth is cumulative — the size of the book over time. It reads as
+ * a daily intake only if you feed it the day's sign-ups, which drew a falling
+ * line whenever a quiet day followed a busy one and looked like customers
+ * leaving. They never do that silently; churn is a lifecycle change.
  */
-const buildCharts = async (range: DashboardRange, includeMoney: boolean) => {
-  const [ordersOverTime, restaurantGrowth, customerGrowth] = await Promise.all([
-    prisma.$queryRaw<{ day: Date; orders: bigint; gmv: number | null }[]>`
-      SELECT date_trunc('day', "createdAt") AS day,
-             COUNT(*) AS orders,
-             SUM("total") AS gmv
-      FROM "Bill"
-      WHERE "createdAt" >= ${range.from} AND "createdAt" <= ${range.to} AND "status" <> 'CANCELLED'
-      GROUP BY 1
-      ORDER BY 1
-    `,
-    prisma.$queryRaw<{ day: Date; count: bigint }[]>`
-      SELECT date_trunc('day', "createdAt") AS day, COUNT(*) AS count
-      FROM "Restaurant"
-      WHERE "createdAt" >= ${range.from} AND "createdAt" <= ${range.to}
-      GROUP BY 1
-      ORDER BY 1
-    `,
-    prisma.$queryRaw<{ day: Date; count: bigint }[]>`
-      SELECT date_trunc('day', "createdAt") AS day, COUNT(*) AS count
-      FROM "Customer"
-      WHERE "createdAt" >= ${range.from} AND "createdAt" <= ${range.to}
-      GROUP BY 1
-      ORDER BY 1
-    `,
+const buildCharts = async (req: any, range: DashboardRange) => {
+  const accountIds = await scopedAccountIdList(req);
+
+  // A scoped caller with no accounts has nothing to chart, and an empty IN ()
+  // is a SQL error rather than an empty result.
+  if (accountIds !== null && accountIds.length === 0) {
+    return { accountGrowth: [], subscriptionMix: [] };
+  }
+
+  const [signups, priorCount, subscriptionMix] = await Promise.all([
+    accountIds === null
+      ? prisma.$queryRaw<{ day: Date; count: bigint }[]>`
+          SELECT date_trunc('day', "createdAt") AS day, COUNT(*) AS count
+          FROM "Account"
+          WHERE "createdAt" >= ${range.from} AND "createdAt" <= ${range.to}
+          GROUP BY 1 ORDER BY 1
+        `
+      : prisma.$queryRaw<{ day: Date; count: bigint }[]>`
+          SELECT date_trunc('day', "createdAt") AS day, COUNT(*) AS count
+          FROM "Account"
+          WHERE "createdAt" >= ${range.from} AND "createdAt" <= ${range.to}
+            AND "id" = ANY(${accountIds})
+          GROUP BY 1 ORDER BY 1
+        `,
+    prisma.account.count({
+      where: {
+        createdAt: { lt: range.from },
+        ...(accountIds === null ? {} : { id: { in: accountIds } }),
+      },
+    }),
+    prisma.subscription.groupBy({
+      by: ["productId", "planId"],
+      where: {
+        status: { in: ["ACTIVE", "TRIAL"] },
+        ...(accountIds === null ? {} : { accountId: { in: accountIds } }),
+      },
+      _count: { _all: true },
+    }),
   ]);
 
+  let running = priorCount;
+  const accountGrowth = signups.map((row) => {
+    running += Number(row.count ?? 0);
+    return { date: row.day, count: running };
+  });
+
+  const products = await prisma.product.findMany({ select: { id: true, key: true, name: true } });
+  const plans = await prisma.plan.findMany({ select: { id: true, key: true, name: true } });
+  const productById = new Map(products.map((p) => [p.id, p]));
+  const planById = new Map(plans.map((p) => [p.id, p]));
+
   return {
-    // COUNT() comes back as a bigint, which JSON.stringify refuses to
-    // serialize — converted here rather than at every call site.
-    ordersOverTime: ordersOverTime.map((row) => ({
-      date: row.day,
-      orders: Number(row.orders),
-      ...(includeMoney ? { gmv: row.gmv ?? 0 } : {}),
+    accountGrowth,
+    subscriptionMix: subscriptionMix.map((row) => ({
+      productId: row.productId,
+      product: productById.get(row.productId)?.name ?? `#${row.productId}`,
+      planId: row.planId,
+      plan: row.planId ? (planById.get(row.planId)?.name ?? null) : null,
+      count: row._count._all,
     })),
-    restaurantGrowth: restaurantGrowth.map((row) => ({ date: row.day, count: Number(row.count) })),
-    customerGrowth: customerGrowth.map((row) => ({ date: row.day, count: Number(row.count) })),
   };
+};
+
+/** Account ids the caller may see, or null for unrestricted. */
+const scopedAccountIdList = async (req: any): Promise<number[] | null> => {
+  const where = accountWhere(req);
+  if (!Object.keys(where).length) return null;
+  const rows = await prisma.account.findMany({ where, select: { id: true } });
+  return rows.map((row) => row.id);
 };

@@ -1,5 +1,9 @@
 import { Router } from "express";
+import accountRoutes from "./accounts/accounts.routes";
 import analyticsRoutes from "./analytics/analytics.routes";
+import commercialRoutes from "./commercial/commercial.routes";
+import onboardingRoutes from "./onboarding/onboarding.routes";
+import salesRoutes from "./sales/sales.routes";
 import auditRoutes from "./audit/audit.routes";
 import authRoutes from "./auth/internalAuth.routes";
 import customerRoutes from "./customers/customers.routes";
@@ -8,7 +12,6 @@ import employeeRoutes from "./employees/employees.routes";
 import orderRoutes from "./orders/orders.routes";
 import restaurantRoutes from "./restaurants/restaurants.routes";
 import roleRoutes from "./roles/roles.routes";
-import settingsRoutes from "./settings/settings.routes";
 import ticketRoutes from "./tickets/tickets.routes";
 import transactionRoutes from "./transactions/transactions.routes";
 import { internalErrorHandler } from "./shared/apiError";
@@ -29,20 +32,29 @@ const router = Router();
 
 router.use("/auth", authRoutes);
 
-// Workspace
+// Customers — the commercial entity everything else hangs off.
+router.use("/accounts", accountRoutes);
+
+// The product tenants behind an account.
 router.use("/restaurants", restaurantRoutes);
 router.use("/customers", customerRoutes);
 router.use("/orders", orderRoutes);
 router.use("/transactions", transactionRoutes);
 
 // Operations
+router.use("/onboarding", onboardingRoutes);
 router.use("/tickets", ticketRoutes);
+
+// Commercial: products, plans, subscriptions, invoices, payments, credit notes.
+router.use("/commercial", commercialRoutes);
+
+// Sales pipeline.
+router.use("/sales", salesRoutes);
 
 // Administration
 router.use("/employees", employeeRoutes);
 router.use("/roles", roleRoutes);
 router.use("/audit-logs", auditRoutes);
-router.use("/settings", settingsRoutes);
 
 // Analytics, reports, system health and application logs.
 router.use("/", analyticsRoutes);

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { internalAuth, requirePermission } from "../rbac/internalAuth.middleware";
 import { PERMISSIONS as P } from "../rbac/permissions";
 import { asyncHandler, badRequest, notFound } from "../shared/apiError";
+import { reportRateLimiter } from "../../../middleware/rateLimit";
 import { AUDIT_ACTIONS, recordAudit } from "../audit/audit.service";
 import { getPlatformAnalytics } from "./analytics.service";
 import { getSystemHealth } from "../system/systemHealth.service";
@@ -23,7 +24,7 @@ router.get(
   "/analytics/platform",
   requirePermission(P.ANALYTICS_VIEW),
   asyncHandler(async (req, res) => {
-    const data = await getPlatformAnalytics(req.internal.permissions, req.query);
+    const data = await getPlatformAnalytics(req, req.internal.permissions, req.query);
     return res.json({ success: true, data });
   }),
 );
@@ -40,9 +41,10 @@ router.get(
 /** Preview on screen — capped, and no audit entry: this is a read. */
 router.get(
   "/reports/:key",
+  reportRateLimiter,
   requirePermission(P.REPORT_VIEW),
   asyncHandler(async (req, res) => {
-    const report = await buildReport(req.params.key, req.query, req.internal.permissions);
+    const report = await buildReport(req, req.params.key, req.query, req.internal.permissions);
     return res.json({
       success: true,
       data: { ...report, rows: report.rows.slice(0, 100), previewOf: report.rowCount },
@@ -57,9 +59,10 @@ router.get(
  */
 router.get(
   "/reports/:key/export",
+  reportRateLimiter,
   requirePermission(P.REPORT_VIEW, P.REPORT_EXPORT),
   asyncHandler(async (req, res) => {
-    const report = await buildReport(req.params.key, req.query, req.internal.permissions);
+    const report = await buildReport(req, req.params.key, req.query, req.internal.permissions);
 
     await recordAudit(req, {
       action: AUDIT_ACTIONS.REPORT_EXPORTED,

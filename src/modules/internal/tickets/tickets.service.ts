@@ -1,6 +1,8 @@
 import prisma from "../../../config/prisma";
+import { relatedAccountWhere } from "../rbac/scope";
 import { AUDIT_ACTIONS, auditData } from "../audit/audit.service";
 import { buildJiraUrl, createJiraIssue, fetchJiraIssue, isJiraConfigured } from "../jira/jira.client";
+import { queueJiraSync } from "../../../jobs/handlers/syncJiraIssue";
 import { ApiError, invalidState, notFound } from "../shared/apiError";
 import { ticketNoForId } from "../shared/ids";
 import { parsePage, parseSort, toPaged } from "../shared/pagination";
@@ -300,35 +302,34 @@ export const getTicket = async (ticketId: number) => {
       : null,
   ]);
 
-  // Jira is polled on read so the status shown is current, and cached back onto
-  // the ticket. A failure here returns null and the last known status is used —
-  // an unreachable Jira must not stop the ticket page rendering.
+  // The ticket page reads the cached Jira status and queues a background
+  // refresh; it does not call Jira inline.
+  //
+  // Polling on read meant every page load waited on a third party — up to the
+  // client's 10-second timeout — so a slow Jira made support slow, and a Jira
+  // outage made a ticket take ten seconds to open. It also meant the status was
+  // only ever as fresh as the last time somebody happened to look, so the
+  // Engineering Issues *list* showed whatever each ticket was showing when it
+  // was last opened.
+  //
+  // Queuing is de-duplicated, so five people opening the same ticket produces
+  // one sync rather than five.
   let jira = null as { key: string; url: string; status?: string | null } | null;
   if (ticket.jiraIssueKey) {
-    const live = await fetchJiraIssue(ticket.jiraIssueKey);
-    if (live) {
-      jira = live;
-      if (live.status && live.status !== ticket.jiraStatus) {
-        await prisma.supportTicket
-          .update({
-            where: { id: ticket.id },
-            data: { jiraStatus: live.status, jiraSyncedAt: new Date() },
-          })
-          .catch(() => undefined);
-      }
-    } else {
-      jira = {
-        key: ticket.jiraIssueKey,
-        url: ticket.jiraIssueUrl ?? buildJiraUrl(ticket.jiraIssueKey) ?? "",
-        status: ticket.jiraStatus,
-      };
-    }
+    jira = {
+      key: ticket.jiraIssueKey,
+      url: ticket.jiraIssueUrl ?? buildJiraUrl(ticket.jiraIssueKey) ?? "",
+      status: ticket.jiraStatus,
+    };
+    // Fire-and-forget: failing to queue a refresh must not fail the read.
+    void queueJiraSync(ticket.id).catch(() => undefined);
   }
 
   return {
     ...ticket,
     linked: { restaurant, customer, order: bill },
     jira,
+    jiraSyncedAt: ticket.jiraSyncedAt,
     jiraConfigured: isJiraConfigured(),
     allowedTransitions: ALLOWED_TRANSITIONS[ticket.status as TicketStatus] ?? [],
   };
@@ -594,12 +595,17 @@ export const linkJiraIssue = async (req: any, ticketId: number, issueKey: string
 };
 
 /** Engineering's view: escalated tickets and the state of their Jira issues. */
-export const listEngineeringIssues = async (query: any) => {
+export const listEngineeringIssues = async (req: any, query: any) => {
   const page = parsePage(query);
   const where = {
-    OR: [
-      { status: { in: ["ESCALATED_TO_ENGINEERING", "ENGINEERING_RESOLVED"] as any } },
-      { jiraIssueKey: { not: null } },
+    AND: [
+      relatedAccountWhere(req),
+      {
+        OR: [
+          { status: { in: ["ESCALATED_TO_ENGINEERING", "ENGINEERING_RESOLVED"] as any } },
+          { jiraIssueKey: { not: null } },
+        ],
+      },
     ],
   };
 

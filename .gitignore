@@ -18,3 +18,5 @@ uploads
 # inside it, because that directory is served statically with no authentication
 # and attachments routinely contain customer data.
 secure-uploads
+# typescript incremental build cache
+tsconfig.tsbuildinfo
