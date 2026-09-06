@@ -16,6 +16,18 @@ export interface SecretCheck {
   /** Blocks startup in production when missing or too weak. */
   requiredInProduction: boolean;
   problem?: string;
+  /**
+   * How bad it is to be missing in production.
+   *
+   * `fatal`    — nothing the process does is safe without it. Refuse to start.
+   * `degraded` — one named feature stops working. Starting is still the right
+   *              call: refusing would turn "signup is broken" into "the whole
+   *              restaurant is offline", which is strictly worse for every
+   *              owner already signed in.
+   */
+  severity: "fatal" | "degraded";
+  /** What actually stops working, for the `degraded` ones. */
+  impact?: string;
 }
 
 /**
@@ -43,26 +55,46 @@ const looksLikePlaceholder = (value: string) =>
 
 const checkSigningSecret = (key: string, requiredInProduction: boolean): SecretCheck => {
   const value = process.env[key];
+  const base = { key, requiredInProduction, severity: "fatal" as const };
   if (!value || !value.trim()) {
-    return { key, present: false, requiredInProduction, problem: "not set" };
+    return { ...base, present: false, problem: "not set" };
   }
   if (looksLikePlaceholder(value)) {
-    return { key, present: true, requiredInProduction, problem: "looks like a placeholder value" };
+    return { ...base, present: true, problem: "looks like a placeholder value" };
   }
   if (value.length < MIN_SECRET_LENGTH) {
     return {
-      key,
+      ...base,
       present: true,
-      requiredInProduction,
       problem: `only ${value.length} characters — needs at least ${MIN_SECRET_LENGTH}`,
     };
   }
-  return { key, present: true, requiredInProduction };
+  return { ...base, present: true };
+};
+
+/**
+ * A setting that only needs to be non-blank.
+ *
+ * Whitespace counts as missing: `SENDGRID_API_KEY=" "` is a value that passes a
+ * truthiness check and then fails at the provider, which is the most annoying
+ * possible way to be misconfigured.
+ */
+const checkPresence = (key: string, impact: string): SecretCheck => {
+  const value = process.env[key];
+  const base = { key, requiredInProduction: true, severity: "degraded" as const, impact };
+  if (!value || !value.trim()) return { ...base, present: false, problem: "not set" };
+  return { ...base, present: true };
 };
 
 export const inspectSecrets = (): SecretCheck[] => [
   checkSigningSecret("JWT_SECRET", true),
   checkSigningSecret("INTERNAL_JWT_SECRET", true),
+  // Without these, mailer.ts throws "Email service is not configured" — but not
+  // until someone is halfway through creating an account or resetting a
+  // password. The whole point of this file is that a deploy should discover
+  // that, not a customer.
+  checkPresence("SENDGRID_API_KEY", "signup verification and password-reset emails"),
+  checkPresence("SENDGRID_FROM_EMAIL", "signup verification and password-reset emails"),
 ];
 
 /**
@@ -79,7 +111,26 @@ export const assertSecretsConfigured = (): void => {
 
   if (!problems.length) return;
 
-  const lines = problems.map((check) => `  - ${check.key}: ${check.problem}`);
+  const describe = (check: SecretCheck) =>
+    `  - ${check.key}: ${check.problem}` + (check.impact ? `\n      breaks: ${check.impact}` : "");
+
+  const fatal = problems.filter((check) => check.severity === "fatal");
+  const degraded = problems.filter((check) => check.severity === "degraded");
+
+  // Printed whether or not startup continues: a feature being silently off in
+  // production is the thing this is here to prevent, and it has to be visible
+  // in the deploy log rather than discovered from a support ticket.
+  if (degraded.length) {
+    console.warn(
+      "\n[secrets] Starting, but these features are OFF because their configuration is missing:\n" +
+        degraded.map(describe).join("\n") +
+        "\n\n  Set them in the deployment's environment configuration and redeploy.\n",
+    );
+  }
+
+  if (!fatal.length) return;
+
+  const lines = fatal.map(describe);
 
   if (isProduction) {
     console.error(
