@@ -365,6 +365,21 @@ export const fetchVendorsData = async (restaurantId: number, branchId: number) =
   });
 };
 
+/**
+ * A branch id is just an integer, and the caller chooses it. Forcing the
+ * restaurantId from the token is not enough on its own: without this, a vendor
+ * could be attached to another tenant's branch, which then shows that vendor in
+ * their branch-scoped lists.
+ */
+const assertBranchOwned = async (branchId: number | undefined, restaurantId: number) => {
+  if (branchId === undefined || branchId === null) return;
+  const branch = await prisma.branch.findFirst({
+    where: { id: branchId, restaurantId },
+    select: { id: true },
+  });
+  if (!branch) throw new Error("Branch not found");
+};
+
 export const createVendor = async (data: {
   restaurantId: number;
   branchId: number;
@@ -374,18 +389,32 @@ export const createVendor = async (data: {
   email?: string;
   vendorType?: string;
 }) => {
+  await assertBranchOwned(data.branchId, data.restaurantId);
   return prisma.vendor.create({ data });
 };
 
 export const updateVendor = async (
   id: number,
-  data: { name?: string; address?: string; phone?: string; email?: string; vendorType?: string },
+  data: {
+    name?: string;
+    address?: string;
+    phone?: string;
+    email?: string;
+    vendorType?: string;
+    branchId?: number;
+  },
   callerRestaurantId: number,
 ) => {
   const existing = await prisma.vendor.findUnique({ where: { id } });
   if (!existing || existing.restaurantId !== callerRestaurantId) {
     throw new Error("Vendor not found");
   }
+  // The check above proves the *row* belongs to the caller; it says nothing
+  // about the fields being written. `data` is now a parsed schema rather than
+  // the raw body, so restaurantId can no longer arrive at all — see
+  // ingredient.validation.ts — and a supplied branchId still has to be one of
+  // the caller's own.
+  await assertBranchOwned(data.branchId, callerRestaurantId);
   return prisma.vendor.update({ where: { id }, data });
 };
 
