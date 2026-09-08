@@ -2,26 +2,73 @@ import bcrypt from "bcryptjs";
 import prisma from "../../config/prisma";
 import { generateToken } from "../../utils/generateToken/generateToken";
 import { normalizeEmail } from "../../utils/email";
+import {
+  assertStaffContactsAvailable,
+  assertStaffPasswords,
+  collectStaffContacts,
+  normalizeStaffContacts,
+  SetupStaffMember,
+} from "./setupStaffChecks";
 import { ForbiddenError } from "./restaurant.validation";
+import { ApiError } from "../../shared/apiError";
 
 export const setupRestaurantService = async (userId: number, body: any) => {
-  const { restaurant, branches, staff, categories } = body;
+  const { restaurant, branches, categories } = body;
+  const staff = normalizeStaffContacts((body.staff || []) as SetupStaffMember[]);
 
   // Same rule createStaffService enforces for staff added after setup — a
   // staff member with login access needs a real password, not the "1234"
   // placeholder below (which only exists to satisfy the NOT NULL column for
   // roster entries that can never log in, per hasLogin's check in auth.service.ts).
-  for (const member of staff || []) {
-    if (member.hasLogin && (!member.password || member.password.length < 6)) {
-      throw new Error("Password must be at least 6 characters for staff with login access");
-    }
+  assertStaffPasswords(staff);
+
+  // User.email/phone are unique table-wide, so a clash would otherwise fail
+  // the whole transaction as a bare P2002 naming a column, not a staff row.
+  // Look the contacts up first and say exactly which row and which field.
+  const { emails, phones } = collectStaffContacts(staff);
+  const existing =
+    emails.length || phones.length
+      ? await prisma.user.findMany({
+          where: {
+            OR: [
+              ...(emails.length ? [{ email: { in: emails } }] : []),
+              ...(phones.length ? [{ phone: { in: phones } }] : []),
+            ],
+          },
+          select: { id: true, email: true, phone: true },
+        })
+      : [];
+  assertStaffContactsAvailable(staff, existing, userId);
+
+  // A repeat submission must not mint a second restaurant. The dashboard
+  // treats a restaurant with no branches as "not set up yet" and shows the
+  // setup form again, so an owner whose earlier attempt saved no branch would
+  // otherwise create an orphan restaurant on every retry. Reuse that
+  // branch-less restaurant; refuse outright once branches exist.
+  const owner = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      restaurant: {
+        select: { id: true, _count: { select: { branches: true, categories: true } } },
+      },
+    },
+  });
+  if (owner?.restaurant && owner.restaurant._count.branches > 0) {
+    throw new ApiError(
+      409,
+      "ALREADY_SET_UP",
+      "Your restaurant is already set up. Refresh the page to open the dashboard.",
+    );
   }
+  const existingRestaurantId = owner?.restaurant?.id ?? null;
+  // Categories from that earlier attempt are kept rather than duplicated.
+  const categoriesToCreate =
+    (owner?.restaurant?._count.categories ?? 0) > 0 ? [] : categories || [];
 
   // Pre-hash passwords before the transaction (CPU-intensive, not a DB call)
   const staffWithPasswords = await Promise.all(
-    (staff || []).map(async (member: any) => ({
+    staff.map(async (member: any) => ({
       ...member,
-      email: normalizeEmail(member.email),
       hashedPassword: await bcrypt.hash(member.password || "1234", 10),
     })),
   );
@@ -29,17 +76,19 @@ export const setupRestaurantService = async (userId: number, body: any) => {
   // Wrap everything in a transaction — if any step fails, all changes roll back
   const result = await prisma.$transaction(
     async (tx) => {
-      // Step 1: create restaurant + link to owner
-      const createdRestaurant = await tx.restaurant.create({
-        data: {
-          name: restaurant.name,
-          phone: restaurant.phone,
-          email: restaurant.email,
-          address: restaurant.address,
-          gstNumber: restaurant.gst,
-          logo: restaurant.logo,
-        },
-      });
+      // Step 1: create the restaurant (or complete the branch-less one from an
+      // earlier attempt) + link to owner
+      const restaurantData = {
+        name: restaurant.name,
+        phone: restaurant.phone,
+        email: restaurant.email,
+        address: restaurant.address,
+        gstNumber: restaurant.gst,
+        logo: restaurant.logo,
+      };
+      const createdRestaurant = existingRestaurantId
+        ? await tx.restaurant.update({ where: { id: existingRestaurantId }, data: restaurantData })
+        : await tx.restaurant.create({ data: restaurantData });
 
       const updatedUser = await tx.user.update({
         where: { id: userId },
@@ -94,7 +143,7 @@ export const setupRestaurantService = async (userId: number, body: any) => {
         ),
 
         Promise.all(
-          (categories || []).map(async (category: any) => {
+          categoriesToCreate.map(async (category: any) => {
             const createdCategory = await tx.category.create({
               data: {
                 restaurantId: createdRestaurant.id,

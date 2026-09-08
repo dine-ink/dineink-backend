@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 
 import prisma from "../../config/prisma";
+import { ApiError } from "../../shared/apiError";
 import {
   setupRestaurantService,
   getShopsService,
@@ -56,16 +57,32 @@ export const setupRestaurant = async (req: any, res: Response) => {
   } catch (error: any) {
     console.log(error.stack);
 
-    // Prisma unique constraint = duplicate email/phone
-    const isDuplicate = error.code === "P2002";
-    const field = error.meta?.target?.[0];
-    const message = isDuplicate
-      ? `A user with this ${field || "email or phone"} already exists. Please use a different value.`
-      : error.message;
+    // Raised by setupStaffChecks with the offending staff row already named.
+    if (error instanceof ApiError) {
+      return res.status(error.status).json({
+        success: false,
+        code: error.code,
+        message: error.message,
+        ...(error.details ? { details: error.details } : {}),
+      });
+    }
+
+    // A unique-constraint failure the pre-check did not catch (a race with a
+    // concurrent signup, say). Still say which field and where to look.
+    if (error.code === "P2002") {
+      const field = error.meta?.target?.[0];
+      const label =
+        field === "phone" ? "phone number" : field === "email" ? "email address" : "email or phone";
+      return res.status(409).json({
+        success: false,
+        code: "DUPLICATE_STAFF_CONTACT",
+        message: `Staff Setup: a staff member's ${label} is already registered to another account. Please use a different one.`,
+      });
+    }
 
     return res.status(500).json({
       success: false,
-      message,
+      message: error.message,
     });
   }
 };
