@@ -105,9 +105,20 @@ model Restaurant {
 
   onboardingTasks RestaurantOnboardingTask[]
 
+  // ─── Commercial ownership ────────────────────────────────────────────────
+  // A Restaurant is a product tenant, not a customer. The customer is the
+  // Account that pays for it — one Account may own several (a group running
+  // two brands), and every Account owns at least one once it converts.
+  //
+  // Nullable only so the migration can backfill; the internal API never
+  // creates a Restaurant without an Account.
+  accountId Int?
+  account   Account? @relation(fields: [accountId], references: [id])
+
   @@index([ownerId])
   @@index([platformStatus])
   @@index([onboardingStage])
+  @@index([accountId])
 }
 
 model Branch {
@@ -136,6 +147,11 @@ model Branch {
 
   // Floor area, for Sales per Sq. Ft. (Annual Sales / area).
   areaSqFt Float?
+
+  // Whether this outlet is trading. Distinct from the account's commercial
+  // lifecycle and from the subscription's health: a closed outlet on a paying
+  // account is a normal, unremarkable state.
+  operationalStatus LocationOperationalStatus @default(ACTIVE)
 
   menuItems              MenuItem[]
   tables                 RestaurantTable[]
@@ -242,6 +258,53 @@ model User {
   salaryDeductions            SalaryDeduction[]
   payrollRunLines             PayrollRunLine[]
   stationSkills               StaffStationSkill[]
+
+  // Brute-force protection. The count itself is not stored — it is derived from
+  // LoginAttempt so the hour is a true sliding window (see auth.service). What
+  // lives here is the resulting state, which has to survive a restart and has
+  // to be visible to support.
+  //
+  // `mustResetPassword` is a latch, not a timer: once too many failures land
+  // inside the window the account cannot be opened by password again at all,
+  // only by proving control of the mailbox. That is deliberately stronger than
+  // the internal console's timed `lockedUntil`, because these accounts hold the
+  // restaurant's financial data and the attacker who tripped it has already
+  // shown they are guessing.
+  mustResetPassword           Boolean                  @default(false)
+  passwordLockedAt            DateTime?
+  // Failures before this instant are ignored when counting. Without it a
+  // successful reset would be immediately re-locked by the same 20 attempts
+  // that caused it.
+  passwordChangedAt           DateTime?
+  loginAttempts               LoginAttempt[]
+}
+
+/**
+ * Every rejected sign-in, so the lockout window can be counted over real events
+ * rather than a counter that a restart or a race can lose, and so "was this an
+ * attack or a colleague fat-fingering their password" is an answerable question.
+ *
+ * Only failures are recorded. Successes would double the write volume of the
+ * busiest endpoint in the product to answer a question nothing currently asks.
+ */
+model LoginAttempt {
+  id         Int      @id @default(autoincrement())
+  // Null when the identifier matched no account — recorded anyway, so probing
+  // for valid addresses is visible in the same place as password guessing.
+  userId     Int?
+  identifier String
+  ip         String?
+  userAgent  String?
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // The lockout query: failures for one user since a given instant.
+  @@index([userId, createdAt])
+  // Supports "who is being targeted" without a userId, for attempts on
+  // addresses that don't exist.
+  @@index([identifier, createdAt])
 }
 
 model EmailOtp {
@@ -576,6 +639,13 @@ model RestaurantTable {
 }
 
 model RunningOrder {
+  // ─── Reconciled from production (2026-08-30) ─────────────────────────────
+  // 85,622 rows carry this column and every one is 'ACTIVE'. It had gone
+  // missing from this schema, so `migrate diff` wanted to drop it — which
+  // would have destroyed a populated column on the live order path. Text, not
+  // an enum, because that is what the database actually has.
+  orderStatus String @default("ACTIVE")
+
   id            Int    @id @default(autoincrement())
   paymentStatus String @default("UNPAID")
   restaurantId  Int
@@ -742,6 +812,16 @@ model IngredientVendor {
 }
 
 model RestaurantInsights {
+  // ─── Reconciled from production (2026-08-30) ─────────────────────────────
+  // These two columns exist in the production database but had gone missing
+  // from this schema, so every `migrate diff` wanted to DROP them — silently
+  // taking the balance-sheet inputs with them. Declared here to match reality.
+  // Both are currently 0 across all rows; whatever populates them is either
+  // not yet built or was removed. That is a question for whoever owns the
+  // insights module, not something to resolve by deleting the columns.
+  capitalEmployed Float? @default(0)
+  propertyValue   Float? @default(0)
+
   id           Int @id @default(autoincrement())
   restaurantId Int
   branchId     Int
@@ -918,7 +998,7 @@ model FinancialAssumptions {
   updatedAt DateTime @updatedAt
 
   restaurant Restaurant @relation(fields: [restaurantId], references: [id])
-  branch     Branch?    @relation(fields: [branchId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id], onDelete: Restrict)
   updatedBy  User?      @relation("FinancialAssumptionsUpdatedBy", fields: [updatedById], references: [id])
 
   @@unique([restaurantId, branchId])
@@ -956,7 +1036,7 @@ model Budget {
   updatedAt DateTime @updatedAt
 
   restaurant Restaurant   @relation(fields: [restaurantId], references: [id])
-  branch     Branch?      @relation(fields: [branchId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id], onDelete: Restrict)
   createdBy  User?        @relation("BudgetCreatedBy", fields: [createdById], references: [id])
   updatedBy  User?        @relation("BudgetUpdatedBy", fields: [updatedById], references: [id])
   items      BudgetItem[]
@@ -1069,7 +1149,7 @@ model FinancialScenario {
   updatedAt DateTime @updatedAt
 
   restaurant Restaurant @relation(fields: [restaurantId], references: [id])
-  branch     Branch?    @relation(fields: [branchId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id], onDelete: Restrict)
   createdBy  User?      @relation("FinancialScenarioCreatedBy", fields: [createdById], references: [id])
   updatedBy  User?      @relation("FinancialScenarioUpdatedBy", fields: [updatedById], references: [id])
 
@@ -1125,7 +1205,7 @@ model FinancialForecast {
   createdAt   DateTime @default(now())
 
   restaurant Restaurant @relation(fields: [restaurantId], references: [id])
-  branch     Branch?    @relation(fields: [branchId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id], onDelete: Restrict)
   createdBy  User?      @relation("FinancialForecastCreatedBy", fields: [createdById], references: [id])
 
   @@index([restaurantId])
@@ -1206,7 +1286,7 @@ model InvestmentProject {
   updatedAt   DateTime @updatedAt
 
   restaurant Restaurant @relation(fields: [restaurantId], references: [id])
-  branch     Branch?    @relation(fields: [branchId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id], onDelete: Restrict)
   createdBy  User?      @relation("InvestmentProjectCreatedBy", fields: [createdById], references: [id])
 
   @@index([restaurantId])
@@ -1240,7 +1320,7 @@ model ExecutiveKpiTarget {
   updatedAt   DateTime @updatedAt
 
   restaurant Restaurant @relation(fields: [restaurantId], references: [id])
-  branch     Branch?    @relation(fields: [branchId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id], onDelete: Restrict)
   updatedBy  User?      @relation("ExecutiveKpiTargetUpdatedBy", fields: [updatedById], references: [id])
 
   @@unique([restaurantId, branchId, kpiKey])
@@ -1305,7 +1385,7 @@ model AIInsightLog {
   generatedAt DateTime @default(now())
 
   restaurant Restaurant @relation(fields: [restaurantId], references: [id])
-  branch     Branch?    @relation(fields: [branchId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id], onDelete: Restrict)
 
   @@index([restaurantId])
   @@index([restaurantId, logDate])
@@ -2201,6 +2281,14 @@ model StaffStationSkill {
 //      owns â€” identity, permissions, audit, support and onboarding state.
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
+/// Whether an outlet is trading. Separate from every commercial state: an
+/// outlet can be CLOSED while the account is a healthy paying customer.
+enum LocationOperationalStatus {
+  ACTIVE
+  INACTIVE
+  CLOSED
+}
+
 enum RestaurantPlatformStatus {
   LEAD
   ONBOARDING
@@ -2269,6 +2357,17 @@ model InternalUser {
   ticketEvents        SupportTicketEvent[]
   onboardingTasksDone RestaurantOnboardingTask[]
 
+  // ─── Commercial model back-relations ─────────────────────────────────────
+  accountsOwned          Account[]           @relation("AccountOwner")
+  accountAssignments     AccountAssignment[] @relation("AssignedAccounts")
+  subscriptionEvents     SubscriptionEvent[] @relation("SubscriptionEventActor")
+  onboardingsAssigned    Onboarding[]        @relation("OnboardingAssignee")
+  onboardingTasksAssigned OnboardingTask[]   @relation("OnboardingTaskAssignee")
+  onboardingTasksCompleted OnboardingTask[]  @relation("OnboardingTaskCompleter")
+  onboardingEvents       OnboardingEvent[]   @relation("OnboardingEventActor")
+  opportunitiesOwned     Opportunity[]       @relation("OpportunityOwner")
+  accountLifecycleEvents AccountLifecycleEvent[] @relation("AccountLifecycleActor")
+
   @@index([status])
   @@index([department])
 }
@@ -2277,12 +2376,25 @@ model InternalUser {
 // (SUPER_ADMIN, OPERATIONS_ADMIN, â€¦); `name` is editable copy. isSystem marks
 // the seeded roles â€” they can be granted/revoked permissions by an authorized
 // admin but never deleted, so an install can't lock itself out.
+/// How much of the customer base a role can reach.
+///
+/// Permissions say what someone may do; this says to whom. Without it,
+/// "Support may read customers" necessarily meant every customer DineInk has.
+enum AccountScope {
+  ALL_ACCOUNTS
+  ASSIGNED_ACCOUNTS
+}
+
 model InternalRole {
   id          Int     @id @default(autoincrement())
   key         String  @unique
   name        String
   description String?
   isSystem    Boolean @default(false)
+
+  /// Defaults to the narrower of the two. A new role invented by an
+  /// administrator should start unable to see the whole book, not able to.
+  accountScope AccountScope @default(ASSIGNED_ACCOUNTS)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2486,10 +2598,14 @@ model SupportTicket {
   // restaurant it referenced being removed. Every read of a linked record goes
   // back through the internal API and is re-checked against the caller's
   // permissions â€” the link itself grants nothing.
+  accountId      Int?
   restaurantId   Int?
   customerId     Int?
   billId         Int?
   runningOrderId Int?
+  /// Which product the complaint concerns. Scalar for the same reason as the
+  /// ids above — the ticket is a record of what was reported.
+  productId      Int?
 
   // Technical context captured at escalation time and forwarded to Jira.
   errorCode     String?
@@ -2514,6 +2630,7 @@ model SupportTicket {
   attachments SupportTicketAttachment[]
 
   @@index([status, priority])
+  @@index([accountId])
   @@index([restaurantId])
   @@index([assignedToId])
   @@index([createdAt])
@@ -2635,4 +2752,751 @@ model ApplicationLog {
   @@index([createdAt])
   @@index([level, createdAt])
   @@index([restaurantId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DineInk commercial model
+//
+// The company sells software to restaurants on subscription. Until now the
+// console had no representation of that at all: `Restaurant` was doing duty as
+// the customer, the product tenant and the commercial lifecycle all at once,
+// which made "who is our customer", "what did they buy" and "are they paying"
+// unanswerable questions.
+//
+// The entity that buys something is an Account. An Account owns one or more
+// Restaurants (product tenants), each of which owns its Branches (outlets) —
+// so a four-outlet group is one Account, not four customers.
+//
+//   Account ──┬── AccountContact
+//             ├── Restaurant ── Branch          (the product tenants/outlets)
+//             ├── Subscription ── Product/Plan
+//             ├── Onboarding ── OnboardingTask
+//             ├── Invoice ── InvoiceLine ── Payment / CreditNote
+//             └── Opportunity
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Where an account sits commercially. Deliberately separate from onboarding
+/// progress, from subscription health, and from whether an outlet is trading —
+/// those are four independent questions that were previously one column.
+enum AccountLifecycleStatus {
+  LEAD
+  PROSPECT
+  CUSTOMER
+  CHURNED
+}
+
+model Account {
+  id          Int                    @id @default(autoincrement())
+  accountCode String                 @unique /// ACC-0001 — quoted between employees
+  name        String
+  legalName   String?
+  status      AccountLifecycleStatus @default(LEAD)
+
+  /// Sales pipeline position. A free-form key rather than an enum because
+  /// Dineink has not defined its stages; SalesStage below is the configurable
+  /// list, and this points at one of its keys.
+  salesStageKey String?
+
+  /// The employee who owns this relationship commercially. Drives both the
+  /// "my accounts" view and, with AccountAssignment, data scoping.
+  ownerId Int?
+
+  // Business and billing identity. Held on the account, not the restaurant:
+  // the contracting party is the group, and its GST number is not an outlet's.
+  gstNumber       String?
+  billingEmail    String?
+  billingPhone    String?
+  billingAddress  String?
+  city            String?
+  state           String?
+  pincode         String?
+  website         String?
+  industrySegment String?
+  notes           String?
+
+  becameCustomerAt DateTime?
+  churnedAt        DateTime?
+  churnReason      String?
+
+  createdById Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  owner         InternalUser?       @relation("AccountOwner", fields: [ownerId], references: [id])
+  contacts      AccountContact[]
+  restaurants   Restaurant[]
+  subscriptions Subscription[]
+  onboardings   Onboarding[]
+  invoices      Invoice[]
+  payments      Payment[]
+  creditNotes   CreditNote[]
+  assignments   AccountAssignment[]
+  opportunities Opportunity[]
+  lifecycleEvents AccountLifecycleEvent[]
+  externalLinks   AccountExternalLink[]
+
+  @@index([status])
+  @@index([ownerId])
+  @@index([name])
+}
+
+model AccountContact {
+  id          Int     @id @default(autoincrement())
+  accountId   Int
+  name        String
+  email       String?
+  phone       String?
+  designation String?
+  /// Exactly one primary contact per account is enforced in the service, not by
+  /// a constraint: a partial unique index would make "promote a different
+  /// contact" order-dependent within the transaction.
+  isPrimary   Boolean @default(false)
+  notes       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@index([email])
+}
+
+/// Which employees may reach which accounts.
+///
+/// This is the mechanism behind data scoping: an employee whose role carries
+/// ASSIGNED_ACCOUNTS scope sees only accounts they appear against here. Without
+/// it every employee could read every customer, which was the largest
+/// authorization gap in the console.
+model AccountAssignment {
+  id          Int      @id @default(autoincrement())
+  accountId   Int
+  employeeId  Int
+  /// What they do on this account — ACCOUNT_MANAGER, ONBOARDING, SUPPORT, …
+  /// Free text so a team convention can change without a migration.
+  role        String?
+  grantedById Int?
+  createdAt   DateTime @default(now())
+
+  account  Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  employee InternalUser @relation("AssignedAccounts", fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, employeeId])
+  @@index([employeeId])
+}
+
+// ─── Products and plans ─────────────────────────────────────────────────────
+
+enum ProductStatus {
+  ACTIVE
+  RETIRED
+}
+
+/// What Dineink sells. Seeded with DINEINK_DOT and DINEINK_RDS; a new product
+/// is a row, not a code change.
+model Product {
+  id            Int           @id @default(autoincrement())
+  key           String        @unique /// DINEINK_DOT, DINEINK_RDS
+  name          String
+  description   String?
+  /// Who the product is aimed at. Copy for the console, not a rule.
+  targetSegment String?
+  status        ProductStatus @default(ACTIVE)
+  sortOrder     Int           @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  plans         Plan[]
+  subscriptions Subscription[]
+  opportunities Opportunity[]
+
+  @@index([status])
+}
+
+enum PlanStatus {
+  ACTIVE
+  RETIRED
+}
+
+enum BillingInterval {
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+}
+
+/// A purchasable tier of a product. RDS has Professional and Enterprise; Dot
+/// currently has none, which is why Subscription.planId is nullable.
+///
+/// Every commercial term below is nullable and seeded unset. Dineink has not
+/// defined pricing, trial length or billing cycle, and a plausible-looking
+/// default would be indistinguishable from a real one once it reached a screen.
+/// Null means "not configured yet" and every consumer renders it as such.
+model Plan {
+  id          Int        @id @default(autoincrement())
+  productId   Int
+  key         String /// PROFESSIONAL, ENTERPRISE
+  name        String
+  description String?
+  status      PlanStatus @default(ACTIVE)
+  sortOrder   Int        @default(0)
+
+  /// Pricing — NOT YET DEFINED BY THE BUSINESS. Null, never zero: zero is a
+  /// price, null is the absence of one.
+  priceAmount     Decimal?         @db.Decimal(12, 2)
+  currency        String?
+  billingInterval BillingInterval?
+  /// Trial length in days. Null = no trial policy defined for this plan.
+  trialDays       Int?
+
+  /// Entitlements. Null = undefined rather than unlimited; the distinction is
+  /// recorded in entitlementNotes rather than guessed at.
+  includedLocations Int?
+  includedSeats     Int?
+  entitlementNotes  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product       Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  subscriptions Subscription[]
+  opportunities Opportunity[]
+
+  @@unique([productId, key])
+  @@index([status])
+}
+
+// ─── Subscriptions ──────────────────────────────────────────────────────────
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  PAUSED
+  CANCELLED
+  EXPIRED
+}
+
+model Subscription {
+  id               Int                @id @default(autoincrement())
+  subscriptionCode String             @unique /// SUB-0001
+  accountId        Int
+  productId        Int
+  /// Null when the product has no plans (Dineink Dot today). The service
+  /// requires one whenever the product has active plans.
+  planId           Int?
+  status           SubscriptionStatus @default(TRIAL)
+
+  startDate          DateTime
+  /// Copied from the plan at creation so a later plan change does not silently
+  /// rewrite an existing agreement. Null while undefined.
+  billingInterval    BillingInterval?
+  trialEndsAt        DateTime?
+  renewalDate        DateTime?
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+
+  /// Contracted quantities for this account, which may differ from the plan's
+  /// defaults. Null = not specified.
+  seats     Int?
+  locations Int?
+
+  cancelledAt        DateTime?
+  cancellationReason String?
+  endedAt            DateTime?
+  notes              String?
+
+  createdById Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+  plan    Plan?   @relation(fields: [planId], references: [id])
+
+  events       SubscriptionEvent[]
+  invoices     Invoice[]
+  invoiceLines InvoiceLine[]
+  onboardings  Onboarding[]
+
+  @@index([accountId])
+  @@index([status])
+  @@index([productId, planId])
+  @@index([renewalDate])
+}
+
+/// The subscription's own history — status moves, plan changes, cancellation.
+/// Separate from the audit log: this is domain history the account timeline is
+/// built from, and it reads without AUDIT_VIEW.
+model SubscriptionEvent {
+  id             Int      @id @default(autoincrement())
+  subscriptionId Int
+  type           String /// CREATED, STATUS_CHANGED, PLAN_CHANGED, CANCELLED, RENEWED
+  fromValue      String?
+  toValue        String?
+  message        String?
+  actorId        Int?
+  createdAt      DateTime @default(now())
+
+  subscription Subscription  @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  actor        InternalUser? @relation("SubscriptionEventActor", fields: [actorId], references: [id])
+
+  @@index([subscriptionId, createdAt])
+}
+
+// ─── Billing ────────────────────────────────────────────────────────────────
+//
+// Restaurants pay DineInk. This is deliberately NOT the `Bill` model, which is
+// a diner paying a restaurant — the two were previously conflated in the
+// dashboard's revenue framing.
+//
+// No payment gateway is integrated and none is assumed. Invoices and payments
+// are recorded by Finance; the model is shaped so a gateway can populate the
+// same rows later without a migration.
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  VOID
+}
+
+model Invoice {
+  id             Int           @id @default(autoincrement())
+  invoiceNo      String        @unique /// INV-0001
+  accountId      Int
+  subscriptionId Int?
+  status         InvoiceStatus @default(DRAFT)
+
+  issueDate   DateTime?
+  dueDate     DateTime?
+  periodStart DateTime?
+  periodEnd   DateTime?
+
+  /// Decimal, not Float. Money in a binary float accumulates error that
+  /// surfaces as a rupee missing from a reconciliation nobody can explain.
+  subtotal   Decimal  @default(0) @db.Decimal(12, 2)
+  /// Tax as charged. Dineink has not defined its rates, so nothing computes
+  /// this — it is entered with the invoice.
+  taxAmount  Decimal? @db.Decimal(12, 2)
+  taxNotes   String?
+  total      Decimal  @default(0) @db.Decimal(12, 2)
+  amountPaid Decimal  @default(0) @db.Decimal(12, 2)
+  currency   String   @default("INR")
+
+  notes      String?
+  voidedAt   DateTime?
+  voidReason String?
+
+  createdById Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  account      Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+  lines        InvoiceLine[]
+  payments     Payment[]
+  creditNotes  CreditNote[]
+
+  @@index([accountId, status])
+  @@index([status, dueDate])
+  @@index([issueDate])
+}
+
+model InvoiceLine {
+  id             Int     @id @default(autoincrement())
+  invoiceId      Int
+  subscriptionId Int?
+  description    String
+  quantity       Decimal @default(1) @db.Decimal(12, 2)
+  unitAmount     Decimal @db.Decimal(12, 2)
+  amount         Decimal @db.Decimal(12, 2)
+  sortOrder      Int     @default(0)
+
+  invoice      Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@index([invoiceId])
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+model Payment {
+  id        Int           @id @default(autoincrement())
+  paymentNo String        @unique /// PAY-0001
+  accountId Int
+  invoiceId Int?
+  amount    Decimal       @db.Decimal(12, 2)
+  currency  String        @default("INR")
+  status    PaymentStatus @default(SUCCEEDED)
+  /// How it arrived — BANK_TRANSFER, UPI, CHEQUE, … Free text because no
+  /// gateway is integrated and the list is an operational convention.
+  method        String?
+  reference     String?
+  receivedAt    DateTime
+  failureReason String?
+  notes         String?
+
+  recordedById Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  account Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  invoice Invoice? @relation(fields: [invoiceId], references: [id])
+
+  @@index([accountId])
+  @@index([invoiceId])
+  @@index([status, receivedAt])
+}
+
+enum CreditNoteStatus {
+  ISSUED
+  APPLIED
+  VOID
+}
+
+/// A credit against an invoice — the SaaS equivalent of a refund. Named for
+/// what it is rather than reusing "refund", which in this codebase already
+/// means a restaurant refunding a diner (`BillRefund`).
+model CreditNote {
+  id           Int              @id @default(autoincrement())
+  creditNoteNo String           @unique /// CN-0001
+  accountId    Int
+  invoiceId    Int?
+  amount       Decimal          @db.Decimal(12, 2)
+  currency     String           @default("INR")
+  status       CreditNoteStatus @default(ISSUED)
+  reason       String
+  issuedAt     DateTime
+  createdById  Int?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  account Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  invoice Invoice? @relation(fields: [invoiceId], references: [id])
+
+  @@index([accountId])
+  @@index([invoiceId])
+}
+
+// ─── Onboarding (account-scoped) ────────────────────────────────────────────
+//
+// Replaces the restaurant-scoped checklist. Onboarding is something a customer
+// goes through after buying, so it hangs off the account and optionally off the
+// subscription that triggered it.
+
+enum OnboardingStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  BLOCKED
+  READY_FOR_GO_LIVE
+  LIVE
+  COMPLETED
+}
+
+model Onboarding {
+  id             Int              @id @default(autoincrement())
+  accountId      Int
+  subscriptionId Int?
+  status         OnboardingStatus @default(NOT_STARTED)
+
+  assignedToId Int?
+  startedAt    DateTime?
+  dueDate      DateTime?
+  goLiveAt     DateTime?
+  completedAt  DateTime?
+
+  blockedReason String?
+  notes         String?
+
+  createdById Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  account      Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  subscription Subscription?     @relation(fields: [subscriptionId], references: [id])
+  assignedTo   InternalUser?     @relation("OnboardingAssignee", fields: [assignedToId], references: [id])
+  tasks        OnboardingTask[]
+  events       OnboardingEvent[]
+
+  @@index([accountId])
+  @@index([status])
+  @@index([assignedToId])
+}
+
+model OnboardingTask {
+  id            Int                  @id @default(autoincrement())
+  onboardingId  Int
+  key           String
+  label         String
+  category      String
+  isMandatory   Boolean              @default(true)
+  status        OnboardingTaskStatus @default(PENDING)
+  notes         String?
+  sortOrder     Int                  @default(0)
+  dueDate       DateTime?
+  assignedToId  Int?
+  completedAt   DateTime?
+  completedById Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  onboarding  Onboarding    @relation(fields: [onboardingId], references: [id], onDelete: Cascade)
+  assignedTo  InternalUser? @relation("OnboardingTaskAssignee", fields: [assignedToId], references: [id])
+  completedBy InternalUser? @relation("OnboardingTaskCompleter", fields: [completedById], references: [id])
+
+  @@unique([onboardingId, key])
+  @@index([onboardingId, status])
+}
+
+model OnboardingEvent {
+  id           Int      @id @default(autoincrement())
+  onboardingId Int
+  type         String /// STATUS_CHANGED, TASK_UPDATED, ASSIGNED, BLOCKED, NOTE
+  fromValue    String?
+  toValue      String?
+  message      String?
+  actorId      Int?
+  createdAt    DateTime @default(now())
+
+  onboarding Onboarding    @relation(fields: [onboardingId], references: [id], onDelete: Cascade)
+  actor      InternalUser? @relation("OnboardingEventActor", fields: [actorId], references: [id])
+
+  @@index([onboardingId, createdAt])
+}
+
+/// Per-product onboarding templates. Dot and RDS Enterprise will not need the
+/// same steps, and the previous template was a hard-coded array. Seeded with
+/// the existing twelve steps as the default (productId null) so nothing is
+/// invented; a product-specific template is a row, not a migration.
+model OnboardingTemplateTask {
+  id          Int      @id @default(autoincrement())
+  productId   Int?
+  key         String
+  label       String
+  category    String
+  isMandatory Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([productId, key])
+  @@index([productId])
+}
+
+// ─── Sales pipeline (lightweight) ───────────────────────────────────────────
+//
+// Deliberately small. Leads and prospects are Accounts in a pre-customer
+// lifecycle state rather than a parallel entity, so converting a lead loses
+// nothing and duplicates nothing. Only the deal itself needs its own row.
+
+/// The pipeline, as configuration. Dineink has not ratified its stages, so the
+/// seeded list is the one from the brief and is editable without a migration.
+model SalesStage {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  name      String
+  sortOrder Int      @default(0)
+  /// Marks terminal stages so conversion and win-rate can be computed without
+  /// hard-coding stage names in queries.
+  isWon     Boolean  @default(false)
+  isLost    Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  opportunities Opportunity[]
+}
+
+model Opportunity {
+  id        Int    @id @default(autoincrement())
+  accountId Int
+  name      String
+  stageId   Int
+  ownerId   Int?
+  /// Interest, not entitlement — which product/plan the deal is for.
+  productId Int?
+  planId    Int?
+  /// Deal value. Null because Dineink has not supplied pricing; entered by
+  /// sales when known rather than derived from a plan price that does not exist.
+  amount            Decimal?  @db.Decimal(12, 2)
+  currency          String?
+  expectedCloseDate DateTime?
+  closedAt          DateTime?
+  lostReason        String?
+  notes             String?
+
+  createdById Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  account Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  stage   SalesStage    @relation(fields: [stageId], references: [id])
+  owner   InternalUser? @relation("OpportunityOwner", fields: [ownerId], references: [id])
+  product Product?      @relation(fields: [productId], references: [id])
+  plan    Plan?         @relation(fields: [planId], references: [id])
+
+  @@index([accountId])
+  @@index([stageId])
+  @@index([ownerId])
+}
+
+// ─── Background work ────────────────────────────────────────────────────────
+//
+// A durable job queue in Postgres rather than Redis + BullMQ.
+//
+// This deployment has no Redis and runs a single `node dist/server.js`. Adding
+// a broker would mean a new service to run, monitor and pay for, to carry a
+// handful of jobs that are neither high-throughput nor latency-sensitive:
+// syncing a Jira status, retrying a failed integration call, tidying expired
+// sessions. Postgres already provides durability, transactions and — via
+// `FOR UPDATE SKIP LOCKED` — safe concurrent claiming across instances.
+//
+// The trade-off is real and worth stating: polling costs a query per interval,
+// and this will not scale to thousands of jobs a second. At that point a broker
+// earns its keep. Nothing here is hard to migrate — handlers take a payload and
+// return; only the claiming changes.
+
+enum BackgroundJobStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  /// Failed but still has attempts left; `runAt` holds the backoff time.
+  FAILED
+  /// Out of attempts. Left in place deliberately — a dead job is evidence, and
+  /// deleting it would hide a broken integration.
+  DEAD
+}
+
+model BackgroundJob {
+  id      Int                 @id @default(autoincrement())
+  type    String
+  payload Json
+  status  BackgroundJobStatus @default(PENDING)
+
+  attempts    Int @default(0)
+  maxAttempts Int @default(5)
+
+  /// When this becomes eligible to run. Also the backoff mechanism: a failed
+  /// job is rescheduled by pushing this forward.
+  runAt DateTime @default(now())
+
+  /// Set while a worker holds the job. `lockedBy` identifies which one, so a
+  /// job stuck RUNNING after a crash can be attributed and reclaimed.
+  lockedAt DateTime?
+  lockedBy String?
+
+  lastError   String?
+  completedAt DateTime?
+
+  /// Optional de-duplication handle. A unique index means "sync ticket 42's
+  /// Jira status" cannot be queued twice while one is already pending.
+  dedupeKey String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([dedupeKey])
+  @@index([status, runAt])
+  @@index([type, status])
+}
+
+/// The account's commercial history.
+///
+/// Retention was previously computed as "joined in month X and their status is
+/// CUSTOMER *today*", which cannot see a customer who left and came back, and
+/// cannot answer "how many customers did we have last March". The subscription
+/// side already had SubscriptionEvent; the account side had nothing.
+///
+/// Written by `setAccountLifecycle` and by the sales pipeline when a deal is
+/// won, in the same transaction as the change itself — so the history cannot
+/// disagree with the row it describes.
+///
+/// `isBackfilled` marks the single synthetic row each pre-existing account
+/// received when this table was introduced. Those rows carry the account's
+/// creation date because that is genuinely all that was known; analytics
+/// excludes them from point-in-time answers rather than treating a made-up
+/// date as history.
+model AccountLifecycleEvent {
+  id        Int                    @id @default(autoincrement())
+  accountId Int
+  fromStatus AccountLifecycleStatus?
+  toStatus  AccountLifecycleStatus
+  reason    String?
+  actorId   Int?
+  /// True only for rows created by the migration that introduced this table.
+  isBackfilled Boolean @default(false)
+  createdAt DateTime @default(now())
+
+  account Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  actor   InternalUser? @relation("AccountLifecycleActor", fields: [actorId], references: [id])
+
+  @@index([accountId, createdAt])
+  @@index([toStatus, createdAt])
+}
+
+/// Which system a linked record lives in.
+enum ExternalSystem {
+  /// Dineink RDS — the restaurant product in this database. A link is not
+  /// strictly needed (Restaurant.accountId already exists) but recording it
+  /// keeps one uniform way to ask "what does this customer run".
+  DINEINK_RDS
+  /// Dineink Dot — a separate application with its own database, its own Shop
+  /// model (UUID keys, phone-based identity) and no shared schema.
+  DINEINK_DOT
+}
+
+/// A pointer from a DinkDesk account to a record in another Dineink system.
+///
+/// WHY A POINTER AND NOT A COPY
+/// Dineink Dot runs on its own Postgres (`dineink_dot`), with `Shop` keyed by
+/// UUID and identified by phone number. Nothing is shared with RDS — not the
+/// database, not the identifier space, not the auth. Copying Dot's shops,
+/// orders or khata entries into this database would create a second source of
+/// truth that goes stale the moment anyone uses the Dot app.
+///
+/// So DinkDesk records only the link: "account ACC-0007's Dot shop is
+/// <uuid>". Commercial facts — who they are, what they pay, their onboarding —
+/// live here, because those are DinkDesk's business. Operational facts stay in
+/// Dot, and are read over an API when Dot exposes one.
+///
+/// WHAT THIS DELIBERATELY DOES NOT DO
+/// It does not verify that the external id exists. Dot has no API to ask, and
+/// a link to a shop that was deleted is a data-quality problem to surface, not
+/// something to prevent by guessing. `verifiedAt` records when a link was last
+/// confirmed against the other system; null means never.
+model AccountExternalLink {
+  id         Int            @id @default(autoincrement())
+  accountId  Int
+  system     ExternalSystem
+  /// The other system's primary key, as text — Dot uses UUIDs, RDS uses ints,
+  /// and a future product may use something else again.
+  externalId String
+  /// Human-readable label from the other system, cached for display so the
+  /// console can show a name without a cross-system call on every page load.
+  externalLabel String?
+  /// When this link was last confirmed to point at something real. Null means
+  /// it has never been checked — which is the honest state today, because Dot
+  /// exposes nothing to check against.
+  verifiedAt DateTime?
+  notes      String?
+
+  linkedById Int?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  /// One link per record per system: the same Dot shop must not be claimed by
+  /// two accounts.
+  @@unique([system, externalId])
+  @@index([accountId])
 }

@@ -19,7 +19,7 @@ router.use(internalAuth);
 router.get(
   "/dashboard",
   asyncHandler(async (req, res) => {
-    const data = await getDashboard(req.internal.permissions, req.query);
+    const data = await getDashboard(req, req.internal.permissions, req.query);
     return res.json({ success: true, data });
   }),
 );
@@ -29,7 +29,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const term = String(req.query.q ?? "");
     if (!term.trim()) throw badRequest("Type something to search for.", "QUERY_REQUIRED");
-    const data = await globalSearch(term, req.internal.permissions);
+    const data = await globalSearch(req, term, req.internal.permissions);
     return res.json({ success: true, data });
   }),
 );
@@ -38,7 +38,7 @@ router.get(
   "/engineering/issues",
   requirePermission(P.ENGINEERING_ISSUE_VIEW),
   asyncHandler(async (req, res) => {
-    const data = await listEngineeringIssues(req.query);
+    const data = await listEngineeringIssues(req, req.query);
     return res.json({ success: true, data });
   }),
 );

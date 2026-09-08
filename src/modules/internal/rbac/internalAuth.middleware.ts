@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import prisma from "../../../config/prisma";
 import type { Permission } from "./permissions";
+import { resolveScope, type AccountScope } from "./scope";
 
 /**
  * Authentication and authorization for every /api/internal route.
@@ -31,8 +32,14 @@ export interface InternalAuthContext {
   name: string;
   sessionId: number;
   tokenId: string;
-  roles: { id: number; key: string; name: string }[];
+  roles: { id: number; key: string; name: string; accountScope: AccountScope }[];
   permissions: Set<string>;
+  /**
+   * How much of the customer base this employee can reach — the widest scope
+   * any of their roles grants. Loaded per request alongside permissions so a
+   * scope change takes effect on the next call rather than the next login.
+   */
+  accountScope: AccountScope;
   mustChangePassword: boolean;
 }
 
@@ -48,11 +55,17 @@ declare global {
 export const INTERNAL_TOKEN_TYPE = "internal";
 
 /**
- * A dedicated secret is strongly preferred so an internal token and a
- * restaurant token are not even cryptographically interchangeable. Falling back
- * to JWT_SECRET keeps a deployment that hasn't set it yet working, and is still
- * safe on its own: the session lookup below rejects any token that wasn't minted
- * by the internal login, whatever key signed it.
+ * The signing key for internal tokens.
+ *
+ * A dedicated secret matters because an internal token and a restaurant token
+ * signed with the same key are cryptographically interchangeable — the only
+ * thing separating them is the session-row lookup below, which is one layer
+ * where there should be two.
+ *
+ * The fallback to JWT_SECRET remains so a local checkout of the restaurant apps
+ * still runs, but `assertSecretsConfigured()` refuses to start a production
+ * process without a dedicated one, so the fallback can no longer quietly become
+ * the production configuration.
  */
 export const getInternalJwtSecret = (): string => {
   const dedicated = process.env.INTERNAL_JWT_SECRET;
@@ -132,8 +145,14 @@ export const internalAuth = async (req: any, res: any, next: any) => {
     name: session.user.name,
     sessionId: session.id,
     tokenId: session.tokenId,
-    roles: session.user.roles.map((r) => ({ id: r.role.id, key: r.role.key, name: r.role.name })),
+    roles: session.user.roles.map((r) => ({
+      id: r.role.id,
+      key: r.role.key,
+      name: r.role.name,
+      accountScope: r.role.accountScope as AccountScope,
+    })),
     permissions,
+    accountScope: resolveScope(session.user.roles.map((r) => r.role)),
     mustChangePassword: session.user.mustChangePassword,
   } satisfies InternalAuthContext;
 

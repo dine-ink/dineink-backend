@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ALL_PERMISSIONS, PERMISSION_GROUPS, ROLE_TEMPLATES, PERMISSIONS as P, isPermission } from "./rbac/permissions";
-import { assertStageTransition, ONBOARDING_STAGES, ONBOARDING_TEMPLATE } from "./onboarding/onboarding.service";
+import { assertOnboardingTransition } from "./onboarding/onboarding.service";
 import { assertTicketTransition } from "./tickets/tickets.service";
 import { deriveTransactionStatus } from "./transactions/transactions.service";
 import { applyContactMasking, maskEmail, maskPhone } from "./shared/pii";
@@ -83,50 +83,43 @@ describe("permission catalog", () => {
   });
 });
 
-describe("onboarding stages", () => {
-  it("allows a single step forward", () => {
-    expect(() => assertStageTransition("LEAD", "INTERESTED")).not.toThrow();
-    expect(() => assertStageTransition("TESTING", "READY")).not.toThrow();
+describe("onboarding lifecycle", () => {
+  /**
+   * Onboarding status is the delivery lifecycle and nothing else. It used to be
+   * one column on Restaurant shared with the commercial lifecycle, which made a
+   * signed, paying customer mid-configuration indistinguishable from a cold
+   * lead.
+   */
+  it("moves forward one step at a time", () => {
+    expect(() => assertOnboardingTransition("NOT_STARTED", "IN_PROGRESS")).not.toThrow();
+    expect(() => assertOnboardingTransition("IN_PROGRESS", "READY_FOR_GO_LIVE")).not.toThrow();
   });
 
-  it("rejects skipping stages", () => {
-    expect(() => assertStageTransition("ONBOARDING", "READY")).toThrow(ApiError);
-    try {
-      assertStageTransition("LEAD", "TESTING");
-    } catch (error: any) {
-      expect(error.code).toBe("STAGE_SKIP_NOT_ALLOWED");
-    }
+  it("refuses to skip straight from not-started to ready", () => {
+    expect(() => assertOnboardingTransition("NOT_STARTED", "READY_FOR_GO_LIVE")).toThrow(
+      /can't move from/i,
+    );
   });
 
-  it("requires a reason to move backwards", () => {
-    expect(() => assertStageTransition("VERIFICATION", "ONBOARDING")).toThrow(ApiError);
-    expect(() => assertStageTransition("VERIFICATION", "ONBOARDING", "Documents rejected")).not.toThrow();
+  it("routes going live through the go-live action, so the checklist gate always runs", () => {
+    expect(() => assertOnboardingTransition("READY_FOR_GO_LIVE", "LIVE")).toThrow(/Go live/i);
   });
 
-  it("routes going live through the activate action, not a stage change", () => {
-    try {
-      assertStageTransition("READY", "ACTIVE");
-      throw new Error("should have thrown");
-    } catch (error: any) {
-      expect(error.code).toBe("USE_ACTIVATE_ACTION");
-    }
+  it("requires a stated blocker when blocking", () => {
+    expect(() => assertOnboardingTransition("IN_PROGRESS", "BLOCKED")).toThrow(/blocking/i);
+    expect(() => assertOnboardingTransition("IN_PROGRESS", "BLOCKED", "waiting on GST certificate")).not.toThrow();
   });
 
-  // Found by running the console against seeded data: a restaurant created
-  // before the internal app has no checklist rows, so `blockers` was empty and
-  // the activation gate passed trivially — for exactly the restaurants that
-  // have never been verified. The template must therefore always yield at least
-  // one mandatory step, and activation must refuse an empty checklist outright.
-  it("always produces at least one mandatory step, so the activation gate can't be vacuous", () => {
-    const mandatory = ONBOARDING_TEMPLATE.filter((task) => task.isMandatory);
-    expect(mandatory.length).toBeGreaterThan(0);
+  it("lets a blocked onboarding resume", () => {
+    expect(() => assertOnboardingTransition("BLOCKED", "IN_PROGRESS")).not.toThrow();
   });
 
-  it("keeps the checklist template consistent with the stages", () => {
-    expect(ONBOARDING_STAGES[0]).toBe("LEAD");
-    expect(ONBOARDING_STAGES[ONBOARDING_STAGES.length - 1]).toBe("ACTIVE");
-    expect(new Set(ONBOARDING_TEMPLATE.map((t) => t.key)).size).toBe(ONBOARDING_TEMPLATE.length);
-    expect(ONBOARDING_TEMPLATE.filter((t) => t.isMandatory).length).toBeGreaterThan(0);
+  it("treats a completed onboarding as finished", () => {
+    expect(() => assertOnboardingTransition("COMPLETED", "IN_PROGRESS")).toThrow(/complete/i);
+  });
+
+  it("rejects a no-op transition rather than writing a pointless event", () => {
+    expect(() => assertOnboardingTransition("IN_PROGRESS", "IN_PROGRESS")).toThrow(/already/i);
   });
 });
 

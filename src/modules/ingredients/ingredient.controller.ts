@@ -175,7 +175,15 @@ export const deleteVendorHandler = async (req: Request, res: Response) => {
 
 export const updateIngredientPriceHandler = async (req: Request, res: Response) => {
   try {
-    const data = await updateIngredientPrice({ ...req.body, restaurantId: (req as any).user.restaurantId });
+    // changedById is who the price history records as making the change, so it
+    // comes from the token rather than the body — it used to be spread in with
+    // the rest of the payload, which let a caller sign the change as someone
+    // else.
+    const data = await updateIngredientPrice({
+      ...req.body,
+      restaurantId: (req as any).user.restaurantId,
+      changedById: (req as any).user.id,
+    });
     return res.json({ success: true, data });
   } catch (err: any) {
     console.log(err);

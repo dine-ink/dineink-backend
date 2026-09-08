@@ -1,4 +1,5 @@
 import prisma from "../../../config/prisma";
+import { queueStats } from "../../../jobs/queue";
 import { getJiraConfig } from "../jira/jira.client";
 
 /**
@@ -102,6 +103,8 @@ const checkConfigured = (key: string, label: string, present: boolean, what: str
 });
 
 export const getSystemHealth = async () => {
+  const jobs = await queueStats();
+
   const [database, jira] = await Promise.all([checkDatabase(), checkJira()]);
 
   const checks: HealthCheck[] = [
@@ -154,6 +157,7 @@ export const getSystemHealth = async () => {
       note: "Measured on the instance that served this request.",
     },
     data: { restaurants, bills, customers, tickets, employees, logs },
+    jobs,
     errors: { last24h: recentErrors },
   };
 };

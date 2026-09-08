@@ -26,33 +26,25 @@ import { normalizeEmail } from "../src/utils/email";
 
 const syncPermissions = process.argv.includes("--sync-permissions");
 
+/**
+ * The only settings the console genuinely reads.
+ *
+ * Removed with the business-model correction: payments.commissionPercent and
+ * payments.settlementCycleDays (DineInk takes no share of restaurant sales),
+ * business.inactiveRestaurantDays and business.atRiskRestaurantDays (a cafe
+ * that has taken no orders is not a customer at risk — we sell them software,
+ * we do not run their kitchen), and the two security keys that nothing ever
+ * consulted.
+ */
 const DEFAULT_SETTINGS: { key: string; group: string; value: unknown; description: string }[] = [
   { key: "company.name", group: "company", value: "DineInk", description: "Legal company name shown across the internal console" },
-  { key: "company.supportEmail", group: "company", value: null, description: "Support address shown to restaurants" },
-  { key: "company.supportPhone", group: "company", value: null, description: "Support phone number shown to restaurants" },
-  {
-    key: "payments.commissionPercent",
-    group: "payments",
-    // Deliberately null, not a number. DineInk's revenue share is not
-    // represented anywhere in the restaurant schema, and defaulting it to a
-    // plausible-looking figure would make every "Dine Revenue" number on the
-    // dashboard a fabrication. Until someone sets this, the dashboard says
-    // "not configured" rather than showing an invented total.
-    value: null,
-    description: "DineInk commission on restaurant GMV, as a percentage. Revenue figures stay hidden until this is set.",
-  },
-  { key: "payments.settlementCycleDays", group: "payments", value: null, description: "Days between settlement runs" },
-  { key: "business.inactiveRestaurantDays", group: "business", value: 3, description: "Days without an order before a restaurant is flagged inactive" },
-  { key: "business.atRiskRestaurantDays", group: "business", value: 7, description: "Days without an order before a restaurant is flagged at risk" },
-  { key: "security.sessionTimeoutHours", group: "security", value: 12, description: "How long an internal session stays valid" },
-  { key: "security.require2faForPrivilegedRoles", group: "security", value: false, description: "Require two-factor authentication for roles with sensitive permissions" },
+  { key: "company.supportEmail", group: "company", value: null, description: "Support address shown to customers" },
+  { key: "company.supportPhone", group: "company", value: null, description: "Support phone number shown to customers" },
 ];
 
-const DEFAULT_FEATURE_FLAGS = [
-  { key: "ANALYTICS_V2", name: "Analytics V2", description: "Next-generation analytics module" },
-  { key: "NEW_ORDER_FLOW", name: "New order flow", description: "Revised order pipeline" },
-  { key: "NEW_PAYMENT_FLOW", name: "New payment flow", description: "Revised payment pipeline" },
-];
+// Feature flags are deliberately not seeded. They were reference-project
+// functionality, Dineink has not asked for them, and three rows advertising a
+// module that does not exist is worse than none.
 
 const seedRoles = async () => {
   for (const template of ROLE_TEMPLATES) {
@@ -65,6 +57,7 @@ const seedRoles = async () => {
           name: template.name,
           description: template.description,
           isSystem: true,
+          accountScope: template.scope,
           permissions: { create: template.permissions.map((permission) => ({ permission })) },
         },
       });
@@ -84,7 +77,12 @@ const seedRoles = async () => {
       }),
       prisma.internalRole.update({
         where: { id: existing.id },
-        data: { name: template.name, description: template.description, isSystem: true },
+        data: {
+          name: template.name,
+          description: template.description,
+          isSystem: true,
+          accountScope: template.scope,
+        },
       }),
     ]);
     console.log(`  ~ synced role ${template.key} to template (${template.permissions.length} permissions)`);
@@ -107,15 +105,6 @@ const seedSettings = async () => {
       },
     });
     console.log(`  + setting ${setting.key}`);
-  }
-};
-
-const seedFeatureFlags = async () => {
-  for (const flag of DEFAULT_FEATURE_FLAGS) {
-    const existing = await prisma.featureFlag.findUnique({ where: { key: flag.key } });
-    if (existing) continue;
-    await prisma.featureFlag.create({ data: { ...flag, isEnabled: false } });
-    console.log(`  + feature flag ${flag.key}`);
   }
 };
 
@@ -175,8 +164,6 @@ const main = async () => {
   await seedRoles();
   console.log("\nPlatform settings:");
   await seedSettings();
-  console.log("\nFeature flags:");
-  await seedFeatureFlags();
   console.log("\nBootstrap admin:");
   await seedBootstrapAdmin();
   console.log("\nDone.");

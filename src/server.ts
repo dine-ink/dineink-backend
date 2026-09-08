@@ -2,7 +2,12 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+import { assertSecretsConfigured } from "./config/secrets";
 import app from "./index";
+
+// Before anything listens. A process that boots, goes green, and only fails
+// when someone tries to sign in is worse than one that refuses to start.
+assertSecretsConfigured();
 
 const PORT = Number(process.env.PORT) || 5500;
 app.listen(PORT, "0.0.0.0", () => {

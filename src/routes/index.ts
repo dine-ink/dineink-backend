@@ -35,48 +35,63 @@ import whatsappRoutes from "../modules/whatsapp/whatsapp.routes";
 import cashflowRoutes from "../modules/cashflow/cashflow.routes";
 import bankingRoutes from "../modules/banking/banking.routes";
 import internalRoutes from "../modules/internal/internal.routes";
+import { guardIdParams } from "../middleware/routeParams";
 
 const router = express.Router();
 
-router.use("/auth", authRoutes);
-router.use("/analytics", analyticsRoutes);
-router.use("/bills", billRoutes);
-router.use("/customers", customerRoutes);
-router.use("/ingredients", ingredientRoutes);
-router.use("/inventory", inventoryRoutes);
-router.use("/restaurant", restaurantRoutes);
-router.use("/running-orders", runningOrderRoutes);
-router.use("/settings", settingsRoutes);
-router.use("/admin", adminRoutes);
-router.use("/reports", reportsRoutes);
-router.use("/cash", cashRoutes);
-router.use("/attendance", attendanceRoutes);
-router.use("/orders", ordersRoutes);
-router.use("/vendors", vendorRoutes);
-router.use("/sop", sopRoutes);
-router.use("/addons", addonRoutes);
-router.use("/discounts", discountRoutes);
-router.use("/procurement", procurementRoutes);
-router.use("/finance", financeRoutes);
-router.use("/finance-assumptions", financeAssumptionsRoutes);
-router.use("/budgets", budgetRoutes);
-router.use("/scenarios", scenarioRoutes);
-router.use("/forecasts", forecastRoutes);
-router.use("/investments", investmentRoutes);
-router.use("/executive", executiveRoutes);
-router.use("/ai", aiRoutes);
-router.use("/dues", duesRoutes);
-router.use("/emi", emiRoutes);
-router.use("/equipment", equipmentRoutes);
-router.use("/labor", laborRoutes);
-router.use("/compliance", complianceRoutes);
-router.use("/whatsapp", whatsappRoutes);
-router.use("/cashflow", cashflowRoutes);
-router.use("/banking", bankingRoutes);
+/**
+ * The API surface, as data.
+ *
+ * Written as a table rather than 36 `router.use(...)` calls so that anything
+ * which must be true of *every* module — today the id-parameter guard, tomorrow
+ * whatever else — is applied by construction instead of by each author
+ * remembering. Adding a module here is one row, and it cannot silently opt out.
+ */
+const MODULES: ReadonlyArray<readonly [path: string, handler: express.Router]> = [
+  ["/auth", authRoutes],
+  ["/analytics", analyticsRoutes],
+  ["/bills", billRoutes],
+  ["/customers", customerRoutes],
+  ["/ingredients", ingredientRoutes],
+  ["/inventory", inventoryRoutes],
+  ["/restaurant", restaurantRoutes],
+  ["/running-orders", runningOrderRoutes],
+  ["/settings", settingsRoutes],
+  ["/admin", adminRoutes],
+  ["/reports", reportsRoutes],
+  ["/cash", cashRoutes],
+  ["/attendance", attendanceRoutes],
+  ["/orders", ordersRoutes],
+  ["/vendors", vendorRoutes],
+  ["/sop", sopRoutes],
+  ["/addons", addonRoutes],
+  ["/discounts", discountRoutes],
+  ["/procurement", procurementRoutes],
+  ["/finance", financeRoutes],
+  ["/finance-assumptions", financeAssumptionsRoutes],
+  ["/budgets", budgetRoutes],
+  ["/scenarios", scenarioRoutes],
+  ["/forecasts", forecastRoutes],
+  ["/investments", investmentRoutes],
+  ["/executive", executiveRoutes],
+  ["/ai", aiRoutes],
+  ["/dues", duesRoutes],
+  ["/emi", emiRoutes],
+  ["/equipment", equipmentRoutes],
+  ["/labor", laborRoutes],
+  ["/compliance", complianceRoutes],
+  ["/whatsapp", whatsappRoutes],
+  ["/cashflow", cashflowRoutes],
+  ["/banking", bankingRoutes],
 
-// DineInk internal operations console. Separate authentication, separate
-// authorization (permission-based, not restaurant-scoped) — see
-// modules/internal/internal.routes.ts.
-router.use("/internal", internalRoutes);
+  // DineInk internal operations console. Separate authentication, separate
+  // authorization (permission-based, not restaurant-scoped) — see
+  // modules/internal/internal.routes.ts.
+  ["/internal", internalRoutes],
+];
+
+for (const [path, handler] of MODULES) {
+  router.use(path, guardIdParams(handler));
+}
 
 export default router;

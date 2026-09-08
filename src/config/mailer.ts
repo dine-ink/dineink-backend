@@ -4,18 +4,50 @@ if (process.env.SENDGRID_API_KEY) {
   sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 }
 
+/**
+ * Refuses to attempt a send that cannot work, and says why — in the log.
+ *
+ * The message that reaches the caller deliberately does not name environment
+ * variables. Someone halfway through creating an account can do nothing with
+ * "SENDGRID_API_KEY is not set", and an unauthenticated caller should not be
+ * told which parts of the deployment are unconfigured. The operator gets the
+ * specifics from the server log and, since `config/secrets.ts` now checks these
+ * at boot, from the deploy log before any customer sees this at all.
+ *
+ * Whitespace counts as missing: a variable set to " " passes a truthiness check
+ * and then fails inside SendGrid with an opaque error.
+ */
+const assertMailerConfigured = (): string => {
+  const missing = (["SENDGRID_API_KEY", "SENDGRID_FROM_EMAIL"] as const).filter(
+    (key) => !process.env[key]?.trim(),
+  );
+
+  if (missing.length) {
+    console.error(
+      `[mailer] Cannot send email — ${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} not set. ` +
+        "Set it in the deployment's environment configuration and redeploy.",
+    );
+    throw new Error(
+      "We couldn't send that email just now. Please try again in a few minutes.",
+    );
+  }
+
+  // Returned rather than read again at each call site: that is what tells the
+  // compiler the address is present, and it trims a trailing space that would
+  // otherwise be rejected by SendGrid as a malformed sender.
+  return process.env.SENDGRID_FROM_EMAIL!.trim();
+};
+
 const sendCodeEmail = async (
   to: string,
   otp: string,
   { subject, heading, body }: { subject: string; heading: string; body: string },
 ) => {
-  if (!process.env.SENDGRID_API_KEY || !process.env.SENDGRID_FROM_EMAIL) {
-    throw new Error("Email service is not configured");
-  }
+  const from = assertMailerConfigured();
 
   await sgMail.send({
     to,
-    from: process.env.SENDGRID_FROM_EMAIL,
+    from,
     subject,
     text: `${body} Your code is ${otp}. It expires in 10 minutes.`,
     html: `
@@ -59,13 +91,11 @@ export const sendInternalPasswordResetEmail = async (
   resetUrl: string,
   expiresInMinutes: number,
 ) => {
-  if (!process.env.SENDGRID_API_KEY || !process.env.SENDGRID_FROM_EMAIL) {
-    throw new Error("Email service is not configured");
-  }
+  const from = assertMailerConfigured();
 
   await sgMail.send({
     to,
-    from: process.env.SENDGRID_FROM_EMAIL,
+    from,
     subject: "Reset your DineInk internal password",
     text:
       `Hi ${name},\n\nUse this link to set a new password for the DineInk internal console:\n${resetUrl}\n\n` +
@@ -90,13 +120,11 @@ export const sendInternalPasswordResetEmail = async (
 // composes, so it's kept as its own small function rather than bending
 // sendCodeEmail's OTP-shaped template to fit.
 export const sendReorderEmail = async (to: string, subject: string, body: string) => {
-  if (!process.env.SENDGRID_API_KEY || !process.env.SENDGRID_FROM_EMAIL) {
-    throw new Error("Email service is not configured");
-  }
+  const from = assertMailerConfigured();
 
   await sgMail.send({
     to,
-    from: process.env.SENDGRID_FROM_EMAIL,
+    from,
     subject,
     text: body,
     html: `

@@ -15,6 +15,8 @@ import {
   getReorderAlerts,
 } from "./ingredient.controller";
 import { authMiddleware } from "../../middleware/auth";
+import { validateBody } from "../../middleware/validate";
+import { createVendorSchema, priceUpdateSchema, updateVendorSchema } from "./ingredient.validation";
 import { requireOwnRestaurant } from "../../middleware/authorize";
 
 const router = express.Router();
@@ -31,13 +33,15 @@ router.post("/uploadVendorData", authMiddleware, uploadVendors);
 router.get("/:restaurantId/:branchId/fetchVendors", authMiddleware, requireOwnRestaurant(), getVendors);
 
 // Vendor CRUD
-router.post("/vendors", authMiddleware, createVendorHandler);
-router.put("/vendors/:id", authMiddleware, updateVendorHandler);
+// The schema is what stops a client-supplied restaurantId reaching
+// prisma.vendor.update — see ingredient.validation.ts.
+router.post("/vendors", authMiddleware, validateBody(createVendorSchema), createVendorHandler);
+router.put("/vendors/:id", authMiddleware, validateBody(updateVendorSchema), updateVendorHandler);
 router.delete("/vendors/:id", authMiddleware, deleteVendorHandler);
 router.get("/vendors/:vendorId/ingredients", authMiddleware, getIngredientsByVendorHandler);
 
 // Price history
-router.post("/price-update", authMiddleware, updateIngredientPriceHandler);
+router.post("/price-update", authMiddleware, validateBody(priceUpdateSchema), updateIngredientPriceHandler);
 router.get("/price-history/:ingredientId", authMiddleware, getIngredientPriceHistoryHandler);
 
 // Short aliases used by Insights page

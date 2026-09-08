@@ -3,6 +3,13 @@ import prisma from "../../config/prisma";
 import { generateToken } from "../../utils/generateToken/generateToken";
 import { sendOtpEmail, sendPasswordResetOtpEmail } from "../../config/mailer";
 import { normalizeEmail } from "../../utils/email";
+import {
+  AttemptContext,
+  clearLockout,
+  lockedError,
+  recordFailedAttempt,
+  registerFailure,
+} from "./auth.lockout";
 
 const OTP_TTL_MINUTES = 10;
 const MAX_OTP_ATTEMPTS = 5;
@@ -34,7 +41,11 @@ export const verifyManagerOverride = async (restaurantId: number, password: stri
   throw new Error("Incorrect manager password");
 };
 
-export const loginUser = async (identifier: string, password: string) => {
+export const loginUser = async (
+  identifier: string,
+  password: string,
+  context: AttemptContext = {},
+) => {
   // identifier may be an email or a phone number — normalizing is a no-op
   // for digits, and makes email matching case-insensitive (a user who
   // signed up as "John@Example.com" must be able to log in as
@@ -61,6 +72,10 @@ export const loginUser = async (identifier: string, password: string) => {
   // USER NOT FOUND
 
   if (!user) {
+    // Recorded with a null userId. Probing for which addresses exist is the
+    // reconnaissance step before password guessing, and it should be visible
+    // in the same place.
+    await recordFailedAttempt(normalizedIdentifier ?? "", null, "NO_SUCH_ACCOUNT", context);
     throw new Error("Invalid credentials");
   }
 
@@ -68,6 +83,17 @@ export const loginUser = async (identifier: string, password: string) => {
 
   if (user.isDeleted || !user.isActive) {
     throw new Error("Account is inactive");
+  }
+
+  // LOCKOUT CHECK
+  //
+  // Before the password comparison, not after: once the account is latched the
+  // password is not a way in even when it is correct, so comparing it would
+  // burn a bcrypt round to reach the same answer.
+
+  if (user.mustResetPassword) {
+    await recordFailedAttempt(normalizedIdentifier ?? "", user.id, "LOCKED", context);
+    throw lockedError();
   }
 
   // LOGIN ACCESS CHECK
@@ -81,6 +107,8 @@ export const loginUser = async (identifier: string, password: string) => {
   const isPasswordValid = await bcrypt.compare(password, user.password);
 
   if (!isPasswordValid) {
+    const { locked } = await registerFailure(user, normalizedIdentifier ?? "", context);
+    if (locked) throw lockedError();
     throw new Error("Invalid credentials");
   }
 
@@ -291,6 +319,10 @@ export const changePasswordService = async (
       password: hashedPassword,
     },
   });
+  // A signed-in change also resets the failure window: the caller held a valid
+  // session and knew the current password, so any failures behind them are
+  // stale.
+  await clearLockout(userId);
   return true;
 };
 
@@ -370,6 +402,11 @@ export const verifyPasswordResetOtpAndSetPassword = async ({
     where: { id: user.id },
     data: { password: hashedPassword },
   });
+
+  // This is the one path that proves control of the mailbox, so it is the one
+  // path that lifts a brute-force lock. Moving passwordChangedAt to now is what
+  // stops the failures that caused the lock from immediately re-triggering it.
+  await clearLockout(user.id);
 
   // Single-use: consume the OTP once the password has been changed.
   await prisma.passwordResetOtp.delete({ where: { email } });

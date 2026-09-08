@@ -2,6 +2,8 @@ node_modules
 
 # env
 .env
+.env.local
+.env.PRODUCTION-BACKUP
 
 # prisma generated
 /generated
@@ -11,3 +13,10 @@ dist
 
 # uploads
 uploads
+
+# Support-ticket attachments. Deliberately a sibling of `uploads` rather than
+# inside it, because that directory is served statically with no authentication
+# and attachments routinely contain customer data.
+secure-uploads
+# typescript incremental build cache
+tsconfig.tsbuildinfo

@@ -1,7 +1,6 @@
 import { hasPermission } from "../rbac/internalAuth.middleware";
 import { PERMISSIONS } from "../rbac/permissions";
 import { AUDIT_ACTIONS, recordAudit } from "../audit/audit.service";
-import * as onboarding from "../onboarding/onboarding.service";
 import { listLiveOrders, listOrders } from "../orders/orders.service";
 import { listTransactions } from "../transactions/transactions.service";
 import { listCustomers } from "../customers/customers.service";
@@ -61,23 +60,6 @@ export const suspend = asyncHandler(async (req, res) => {
 
 export const activity = asyncHandler(async (req, res) => {
   const data = await service.getRestaurantActivity(restaurantId(req));
-  return res.json({ success: true, data });
-});
-
-// ─── Onboarding ──────────────────────────────────────────────────────────────
-
-export const getOnboarding = asyncHandler(async (req, res) => {
-  const data = await onboarding.getChecklist(restaurantId(req));
-  return res.json({ success: true, data: { ...data, stages: onboarding.ONBOARDING_STAGES } });
-});
-
-export const updateOnboardingTask = asyncHandler(async (req, res) => {
-  const data = await onboarding.updateTask(req, restaurantId(req), req.params.taskKey, req.body ?? {});
-  return res.json({ success: true, data });
-});
-
-export const setOnboardingStage = asyncHandler(async (req, res) => {
-  const data = await onboarding.setStage(req, restaurantId(req), req.body?.stage, req.body?.reason);
   return res.json({ success: true, data });
 });
 
